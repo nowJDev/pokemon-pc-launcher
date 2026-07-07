@@ -72,6 +72,12 @@
 * **이유**: 일부 스마트폰(삼성, 샤오미 등) 기기는 화면 송출과 별개로 외부 마우스 터치 입력을 차단하는 별도의 보안 옵션이 기본 활성화되어 있기 때문입니다.
 * **해결책**: 스마트폰의 **설정 ➡️ 개발자 옵션**으로 이동하여 **`USB 디버깅 (보안 설정)`** (또는 '보안 디버깅', '모의 입력 허용' 등) 옵션을 찾아서 **활성화(켬)** 상태로 변경해 주시기 바랍니다. (※ 기본 `USB 디버깅` 옵션은 켠 상태를 유지해야 합니다.)
 
+#### Q. USB 기기 무선 연결 자동 설정 시 오류가 발생하거나 연결이 계속 실패합니다.
+* **해결책**: 스마트폰에 이전에 등록된 디버깅 인증 값이 꼬여서 발생할 수 있습니다. 
+  1. 스마트폰의 **설정 ➡️ 개발자 옵션**으로 이동합니다.
+  2. **`USB 디버깅 권한 승인 취소`** 항목을 눌러 기존 등록 기록을 모두 삭제합니다.
+  3. USB 케이블을 분리했다가 다시 연결하면 화면에 *"USB 디버깅을 허용하시겠습니까?"* 팝업이 다시 뜹니다. **"이 컴퓨터에서 항상 허용"**에 체크하고 **[허용]**을 누른 뒤 다시 설정을 진행해 주시기 바랍니다.
+
 ---
 ---
 
@@ -142,3 +148,10 @@ This happens if your phone connects to a different Wi-Fi network or the router r
 #### Q. The window mirrors correctly, but mouse clicks (touch input) do not work at all.
 * **Reason**: Some devices (Samsung, Xiaomi, etc.) block external touch injection by default for security, even if general debugging is on.
 * **Solution**: Go to your phone's **Settings ➡️ Developer options** and toggle **`USB debugging (Security settings)`** (or 'Allow mock input / secure debugging') **ON**. (Note: The main `USB debugging` toggle must remain ON.)
+
+#### Q. Wireless connection fails or device setup displays an error.
+* **Solution**: The debugging authentication tokens on the phone may have become corrupted.
+  1. Go to your phone's **Settings ➡️ Developer options**.
+  2. Tap **`Revoke USB debugging authorizations`** to clear previous authorization records.
+  3. Unplug the USB cable and plug it back in. When the *"Allow USB debugging?"* prompt appears, check **"Always allow from this computer"** and tap **[Allow]**. Then retry the automatic setup.
+
