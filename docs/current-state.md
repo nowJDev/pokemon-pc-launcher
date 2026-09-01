@@ -2,8 +2,8 @@
 
 **갱신일:** 2026-09-01.
 
-**기준 브랜치·커밋:** `main` / `d6ad645`.
-**활성 작업:** Pokémon PC Launcher 0.1 멀티게임 리팩터링.
+**기준 브랜치·커밋:** `main` / `0100f7a`.
+**활성 작업:** Pokémon PC Launcher 0.1 독자 아이콘 적용과 Release 준비.
 
 ## 제품·기술 기준선.
 
@@ -18,8 +18,10 @@
 - 완료: PyInstaller 실행 파일 빌드와 Windows GUI 시작·X 종료 smoke test다.
 - 완료: 전체 diff와 코드 리뷰 지적 처리다.
 - 완료: 검증된 변경의 한글 커밋 정리다.
+- 완료: APK 추출 아이콘을 독자적인 PC·스마트폰 연결 아이콘으로 교체하고 PNG 원본을 보존했다.
 - 대기: 두 실제 게임의 USB·Wi-Fi·Virtual Display·미러링 수동 검증이다.
 - 알려진 문제: 실제 게임 실행 뒤 Windows 폴더 잠금 해제는 Android 기기로 최종 검증해야 한다.
+- 배포 게이트: 원본 저장소에 LICENSE가 없어 원저작자의 재배포 조건 확인 전에는 공개 Release를 만들지 않는다.
 
 ## 검증 기준선.
 
@@ -30,8 +32,11 @@
 - ADB 진단: 시작 전 server 없음, bundled `server-status` 호출 후 Worktree의 `bin/adb/adb.exe` PID 생성, `kill-server` 후 PID 제거를 확인했다.
 - 바이너리 진단: 공식 scrcpy 4.0 Windows ZIP의 게시 SHA-256을 확인했고 저장소의 ADB·scrcpy 관련 11개 파일이 공식 ZIP과 모두 일치했다.
 - Windows smoke: 최종 GUI 제목과 X 종료를 확인했고 launcher·bundled adb·bundled scrcpy 잔류가 모두 0이었다. 임시 배포 폴더의 rename과 삭제도 성공했다.
+- 아이콘: 1254x1254 RGBA 원본과 16·24·32·48·64·128·256픽셀 ICO 프레임을 확인했고 EXE 내 32픽셀 아이콘을 추출해 새 디자인을 확인했다.
+- 아이콘 빌드 smoke: 실제 Windows 사용자 컨텍스트에서 PyInstaller가 Tcl/Tk를 포함해 빌드됐으며 GUI 자식 창 두 개를 정상 종료한 뒤 작업 사본의 launcher·ADB·scrcpy 잔류가 0개였다.
 - 시각 자동화: Computer Use native helper pipe가 없어 스크린샷 기반 위젯 검증은 수행하지 못했다.
 
 ## 다음 작업.
 
-1. 실제 Android 기기에서 16개 수동 시나리오와 게임 종료 뒤 폴더 rename·삭제를 검증한다.
+1. 원본 저장소 저작자에게 코드 재배포 라이선스를 확인한다.
+2. 실제 Android 기기에서 16개 수동 시나리오와 게임 종료 뒤 폴더 rename·삭제를 검증한다.

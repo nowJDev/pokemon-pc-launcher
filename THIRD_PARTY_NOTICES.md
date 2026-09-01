@@ -63,8 +63,15 @@
 
 - `bin/aapt.exe`와 `bin/aapt-arm-pie`는 scrcpy 4.0 ZIP에 없으며 현재 Python 런처에서 사용하지 않습니다.
 - TODO: 두 파일의 출처, 버전, 실제 필요 여부와 적용 라이선스를 확인하기 전에는 새 배포본에 포함하지 않습니다. 확인 없이 삭제하지도 않습니다.
-- `pokemon_icon.ico`와 동일 아이콘 복사본의 권리 관계는 저장소에서 확인할 수 없습니다.
-- TODO: 재배포 권한이 확인된 자체 아이콘으로 교체하거나 권리 근거를 문서화해야 합니다.
+- APK에서 추출했던 기존 아이콘은 2026-09-01에 제거했습니다.
+- 현재 `pokemon_icon.ico`와 `bin/scrcpy/pokemon_icon.ico`는 생성형 이미지로 제작한 독자적인 PC·스마트폰 연결 아이콘입니다.
+- 승인된 PNG 원본은 `assets/launcher_icon.png`에 보존하며 Pokémon 캐릭터, 로고, 포켓볼과 게임 로고를 생성 조건에서 제외했습니다.
+
+## 프로젝트 코드 라이선스
+
+- 이 저장소는 `DOHA1012/pokemon-champions-pc`의 fork이며 원본 저장소에는 2026-09-01 기준 LICENSE가 없습니다.
+- [GitHub의 공식 라이선스 안내](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)에 따라 LICENSE가 없는 코드는 기본 저작권법의 적용을 받습니다.
+- 원저작자의 재배포 허가와 파생 프로젝트의 라이선스 조건을 확인하기 전에는 공개 바이너리 Release를 만들지 않습니다.
 
 ## 배포 차단 체크리스트
 
@@ -72,7 +79,7 @@
 - [ ] ADB/Platform-Tools NOTICE와 배포 조건을 확인합니다.
 - [ ] FFmpeg 실제 빌드 옵션과 대응 소스 제공 의무를 확인합니다.
 - [ ] `aapt` 파일의 출처와 필요성을 확인합니다.
-- [ ] 아이콘 재배포 권리를 확인합니다.
-- [ ] 프로젝트 자체 코드의 LICENSE를 저장소 소유자가 선택합니다.
+- [x] APK 추출 아이콘을 제거하고 독자적인 생성 이미지와 원본 PNG로 교체합니다.
+- [ ] 원본 코드 저작자의 재배포 허가와 파생 프로젝트의 LICENSE 조건을 확인합니다.
 
 위 항목이 끝나기 전에는 이 문서를 완전한 라이선스 고지로 간주하지 않습니다.
