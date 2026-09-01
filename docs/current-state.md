@@ -1,0 +1,37 @@
+# 프로젝트 현재 상태.
+
+**갱신일:** 2026-09-01.
+
+**기준 브랜치·커밋:** `main` / `d6ad645`.
+**활성 작업:** Pokémon PC Launcher 0.1 멀티게임 리팩터링.
+
+## 제품·기술 기준선.
+
+- 제품 목적: Android의 Pokémon 게임을 ADB와 scrcpy로 Windows 독립 창에 실행한다.
+- 핵심 기술: Python 3.11, Tkinter, ADB 37.0.0, scrcpy 4.0, PyInstaller 6.20.0이다.
+- 실행 환경: Windows PC와 USB 또는 Wi-Fi ADB가 활성화된 Android 기기다.
+- 주요 제약: 저장소에 자동 테스트가 없고 실제 게임·장치 동작은 연결된 Android 기기가 필요하다.
+
+## 구현 상태.
+
+- 완료: 프로필·core·GUI·단위 테스트·README·제3자 고지의 0.1 구현이다.
+- 완료: PyInstaller 실행 파일 빌드와 Windows GUI 시작·X 종료 smoke test다.
+- 완료: 전체 diff와 코드 리뷰 지적 처리다.
+- 완료: 검증된 변경의 한글 커밋 정리다.
+- 대기: 두 실제 게임의 USB·Wi-Fi·Virtual Display·미러링 수동 검증이다.
+- 알려진 문제: 실제 게임 실행 뒤 Windows 폴더 잠금 해제는 Android 기기로 최종 검증해야 한다.
+
+## 검증 기준선.
+
+- 빌드: 루트 `Pokémon PC Launcher.exe`를 PyInstaller 6.20.0으로 생성했다.
+- 테스트: `python -m unittest discover -v` 결과 68개 테스트, 성공이다.
+- 정적 검사: 세 Python 모듈의 `py_compile`과 `git diff --check`가 성공했다.
+- 수동 검증: 이번 작업 세션에서는 실제 Android 기기를 아직 연결하지 않았다.
+- ADB 진단: 시작 전 server 없음, bundled `server-status` 호출 후 Worktree의 `bin/adb/adb.exe` PID 생성, `kill-server` 후 PID 제거를 확인했다.
+- 바이너리 진단: 공식 scrcpy 4.0 Windows ZIP의 게시 SHA-256을 확인했고 저장소의 ADB·scrcpy 관련 11개 파일이 공식 ZIP과 모두 일치했다.
+- Windows smoke: 최종 GUI 제목과 X 종료를 확인했고 launcher·bundled adb·bundled scrcpy 잔류가 모두 0이었다. 임시 배포 폴더의 rename과 삭제도 성공했다.
+- 시각 자동화: Computer Use native helper pipe가 없어 스크린샷 기반 위젯 검증은 수행하지 못했다.
+
+## 다음 작업.
+
+1. 실제 Android 기기에서 16개 수동 시나리오와 게임 종료 뒤 폴더 rename·삭제를 검증한다.

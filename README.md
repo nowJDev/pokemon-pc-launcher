@@ -1,157 +1,129 @@
-# Pokémon Champions PC 무선 실행기 (Pokémon Champions PC Launcher)
+# Pokémon PC Launcher
 
-[한글 (Korean)](#한글-사용-설명서) | [English](#english-user-guide)
+Windows PC에서 ADB와 scrcpy를 이용해 Android 기기에 설치된 Pokémon 게임을 독립 창으로 실행하는 비공식 런처입니다.
 
----
+현재 버전은 기능 안정화 단계인 **0.1**입니다. 실제 기기 조합에서 주요 시나리오를 모두 검증한 뒤에만 1.0으로 올릴 예정입니다.
 
-## 한글 사용 설명서
+이 저장소에는 Pokémon 게임 자체가 포함되어 있지 않습니다. 사용자가 소유한 Android 기기에 게임을 직접 설치해야 합니다.
 
-이 패키지는 스마트폰에서 구동되는 **포켓몬 챔피언스(Pokémon Champions)** 게임을 PC 화면에 고해상도 독립 창으로 미러링하여 키보드와 마우스로 무선 플레이할 수 있도록 돕는 전용 런처입니다.
+## 공식 지원 게임
 
-## 📥 최신 버전 다운로드 (v1.3.0)
-아래 링크에서 런처 패키지 zip 파일을 무료로 다운로드하실 수 있습니다. 다운로드 후 압축을 풀어 사용하세요:
-👉 **[Pokémon Champions PC Standalone Package 다운로드 (ZIP)](https://github.com/DOHA1012/pokemon-champions-pc/releases/download/v1.3.0/Pokemon_Champions_PC.zip)**
+| 게임 | 화면 방향 | 기본 해상도 | 권장 실행 방식 |
+| --- | --- | --- | --- |
+| Pokémon Champions | 가로 | 1280x720 | Virtual Display |
+| Pokémon TCG Pocket | 세로 | 720x1280 | Virtual Display 또는 기본 화면 미러링 |
 
-### ✨ 주요 핵심 기능
-* **화면 해상도 다중 지원**: 720p부터 4K(3840x2160)까지 다양한 해상도 지원 (2K/4K 무선 스트리밍은 기기 성능 및 공유기 대역폭에 따라 렉이 발생할 수 있습니다.)
-* **테두리 없는 전체화면 모드**: 타이틀 바를 숨기고 화면을 꽉 차게 띄워 몰입감을 높여줍니다.
-* **폰 화면 자동 끄기 & 연결 유지 (Stay Awake)**: 게임 구동 시 폰의 실제 화면(액정)은 배터리 및 발열 방지를 위해 자동으로 꺼지고, 플레이 중에는 폰이 대기 상태로 잠들지 않도록 제어합니다.
-* **최대 프레임 제한 옵션 (FPS)**: 네트워크 대역폭 및 PC/기기 성능에 맞춰 프레임 제한을 유연하게(30 FPS ~ 144 FPS, 혹은 제한 없음) 조정하여 버벅임 현상을 대폭 개선할 수 있습니다.
-* **기기 자동 깨우기 및 잠금 해제**: 실행 즉시 폰의 화면을 자동으로 켜고 잠금 화면을 진입해 줍니다.
+Pokémon TCG Pocket의 Virtual Display 호환성은 기기와 Android 버전에 따라 다를 수 있습니다. 화면이 정상적으로 렌더링되지 않으면 실행 모드를 `기본 화면 미러링`으로 직접 바꾸세요. 런처는 예상하지 못한 화면 전환을 막기 위해 자동 fallback을 수행하지 않습니다.
 
----
+## 주요 기능
 
-### 📂 폴더 구성 정보
-압축 해제 시 다음과 같은 폴더 구조로 이루어져 있습니다:
-* 📄 **Pokémon Champions.exe** - 사용자 실행용 GUI 프로그램 (더블 클릭하여 실행)
-* 📁 **bin** - 실행에 필요한 핵심 엔진 폴더 (수정하거나 삭제하지 마세요)
-  * 📁 `adb` - 안드로이드 연결용 통신 엔진
-  * 📁 `scrcpy` - 화면 송출 및 가상 창 생성 엔진
+- 게임 프로필 기반 멀티게임 선택.
+- USB 및 Wi-Fi ADB 기기 선택과 상태 표시.
+- USB 기기의 TCP/IP 5555 자동 설정과 연결 상태 재검증.
+- 수동 무선 ADB 연결 및 연결 해제.
+- 게임별 기본 해상도, 사용자 지정 해상도, 기기 원본 해상도.
+- FPS 제한, Borderless Fullscreen, 스마트폰 화면 끄기, stay-awake.
+- Virtual Display 생성 후 실제 display ID 탐색과 선택 게임 자동 실행.
+- 기본 Android display 0을 사용하는 명시적 미러링 호환 모드.
+- Package 설치 여부와 launchable Activity 자동 탐색.
+- 종료 시 scrcpy, pipe, worker, 런처가 생성한 무선 연결과 ADB server 정리.
 
----
+## 실행 전 준비
 
-### 🚀 사용 및 연결 방법
+1. Windows 10 이상 PC를 사용합니다.
+2. Android 기기에서 `설정 → 휴대전화 정보 → 소프트웨어 정보 → 빌드 번호`를 여러 번 눌러 개발자 옵션을 활성화합니다.
+3. 개발자 옵션에서 `USB 디버깅`을 켭니다.
+4. USB 케이블로 기기를 연결하고 스마트폰에 표시되는 디버깅 허용 창을 승인합니다.
+5. 지원 게임을 Android 기기에 설치합니다.
 
-#### 1단계: 스마트폰 사전 설정 (최초 1회 필수)
-1. 스마트폰 **설정** ➡️ **휴대폰 정보** ➡️ **소프트웨어 정보**로 이동합니다.
-2. **빌드 번호** 항목을 **7번 연속**으로 연타하여 개발자 옵션을 활성화합니다.
-3. 설정 메인 화면으로 돌아와 맨 아래의 **개발자 옵션**으로 들어갑니다.
-4. **USB 디버깅** 항목을 찾아서 **활성화(켬)** 상태로 켭니다.
+`unauthorized` 상태가 표시되면 스마트폰에서 USB 디버깅 허용을 승인하세요. `offline` 상태가 표시되면 케이블 또는 무선 연결을 다시 연결한 뒤 기기 목록을 새로고침하세요.
 
-#### 2단계: PC와 무선 연결 자동 설정
-1. PC와 스마트폰을 **동일한 와이파이 공유기**에 연결합니다.
-2. 스마트폰을 **USB 케이블로 PC에 연결**합니다.
-   * *이때 스마트폰 화면에 "USB 디버깅을 허용하시겠습니까?" 팝업이 뜨면 **"이 컴퓨터에서 항상 허용"**에 체크하고 **[허용]**을 누릅니다.*
-3. **`Pokémon Champions.exe`**를 더블 클릭하여 실행합니다.
-4. 프로그램 창 중간의 **`★ USB 기기로 무선 연결 자동 설정`** 버튼을 누릅니다.
-5. "자동 설정이 완료되었습니다" 팝업이 뜨면 **USB 케이블을 분리(해제)**합니다. (이제 무선으로 연결됩니다.)
+## 사용 방법
 
-#### 3단계: 무선 게임 실행
-1. 프로그램 창 상단의 기기 선택 목록에서 무선 기기(`192.168.x.x:5555`)가 선택되어 있는지 확인합니다.
-2. **3. 해상도 및 화면 설정**에서 원하는 가상 창 해상도와 테두리 없는 전체화면 여부를 지정합니다.
-3. 맨 하단의 초록색 **`포켓몬 챔피언스 실행 (PC 독립 창)`** 버튼을 누릅니다.
-4. 잠시 후 스마트폰의 화면이 켜지며 게임이 자동 구동되고, PC 화면에는 독립된 고화질 게임 창이 생성됩니다. (스마트폰의 실제 화면은 실행 즉시 꺼집니다.)
+1. `Pokémon PC Launcher.exe` 또는 `python pokemon_launcher.py`를 실행합니다.
+2. 실행할 게임을 선택합니다.
+3. 연결할 Android 기기를 선택합니다.
+4. 필요하면 USB 기기를 무선 ADB로 자동 설정하거나 IP 주소로 연결합니다.
+5. 해상도와 실행 모드, FPS 및 화면 옵션을 선택합니다.
+6. 게임 실행 버튼을 누릅니다.
 
----
+게임 실행 전 런처는 다음 순서로 검증합니다.
 
-### 🛠️ 문제 해결 (FAQ)
+1. 선택 게임과 기기.
+2. 기기의 현재 ADB 상태.
+3. 선택 게임 package의 정확한 설치 여부.
+4. Android Package Manager가 반환하는 launchable Activity.
+5. 해상도와 실행 옵션.
+6. scrcpy 실행과 Virtual Display ID.
+7. Activity 실행과 게임 프로세스 상태.
 
-#### Q. 스마트폰을 껐다 켰더니 연결이 안 됩니다.
-안드로이드 보안 정책상 폰을 재부팅하면 무선 포트가 닫힙니다. 
-* **해결책:** 폰을 다시 USB 케이블로 PC에 연결한 뒤, 실행기를 켜고 **`★ USB 기기로 무선 연결 자동 설정`** 버튼을 다시 한번 눌러주시면 무선 포트가 재개방됩니다.
+어느 단계에서든 실패하면 다음 단계로 넘어가지 않으며 `launcher.log`에 진단 내용을 남깁니다.
 
-#### Q. 와이파이 IP 주소가 변경되어 연결이 끊겼습니다.
-폰이 다른 와이파이에 연결되었거나 공유기가 재시작되어 IP가 바뀔 수 있습니다.
-* **해결책:** 폰 설정의 와이파이 세부 정보에서 바뀐 IP를 확인한 뒤, 실행기의 **무선 IP 주소** 칸에 직접 입력하고 **`무선 연결`** 버튼을 눌러주시면 연결됩니다.
+## 실행 모드
 
-#### Q. 실행 후 직접 폰 전원 버튼을 눌러 화면을 끄면 PC 화면도 꺼집니다.
-* **이유**: 안드로이드 OS는 사용자가 물리 전원 버튼을 누르는 순간 렌더링 엔진 자체를 일시 정지시킵니다.
-* **해결책**: 런처가 스마트폰의 실제 화면(액정)을 자동으로 꺼주기 때문에, 실행 후에는 **전원 버튼을 직접 누르지 마시고 그대로 폰을 냅두시면 됩니다.**
+### Virtual Display
 
-#### Q. 실행은 잘 되는데 마우스 클릭(터치 조작)이 아예 안 먹힙니다.
-* **이유**: 일부 스마트폰(삼성, 샤오미 등) 기기는 화면 송출과 별개로 외부 마우스 터치 입력을 차단하는 별도의 보안 옵션이 기본 활성화되어 있기 때문입니다.
-* **해결책**: 스마트폰의 **설정 ➡️ 개발자 옵션**으로 이동하여 **`USB 디버깅 (보안 설정)`** (또는 '보안 디버깅', '모의 입력 허용' 등) 옵션을 찾아서 **활성화(켬)** 상태로 변경해 주시기 바랍니다. (※ 기본 `USB 디버깅` 옵션은 켠 상태를 유지해야 합니다.)
+scrcpy의 `--new-display=WIDTHxHEIGHT/DPI`로 새 Android display를 만든 뒤, scrcpy 로그와 `dumpsys display`를 이용해 새 display ID를 확인합니다. ID를 찾지 못하면 display 0으로 전환하지 않고 오류로 종료합니다.
 
-#### Q. USB 기기 무선 연결 자동 설정 시 오류가 발생하거나 연결이 계속 실패합니다.
-* **해결책**: 스마트폰에 이전에 등록된 디버깅 인증 값이 꼬여서 발생할 수 있습니다. 
-  1. 스마트폰의 **설정 ➡️ 개발자 옵션**으로 이동합니다.
-  2. **`USB 디버깅 권한 승인 취소`** 항목을 눌러 기존 등록 기록을 모두 삭제합니다.
-  3. USB 케이블을 분리했다가 다시 연결하면 화면에 *"USB 디버깅을 허용하시겠습니까?"* 팝업이 다시 뜹니다. **"이 컴퓨터에서 항상 허용"**에 체크하고 **[허용]**을 누른 뒤 다시 설정을 진행해 주시기 바랍니다.
+### 기본 화면 미러링
 
----
----
+선택한 앱을 Android 기본 display 0에서 실행하고 일반 scrcpy 미러링을 사용합니다. 선택 해상도의 긴 변은 scrcpy `--max-size`에 적용됩니다. Virtual Display에서 렌더링되지 않는 게임이나 기기의 호환 모드입니다.
 
-## English User Guide
+## 무선 ADB 보안
 
-This package is a dedicated launcher designed to mirror **Pokémon Champions** running on an Android device onto a high-resolution, independent PC window, allowing wireless gameplay with a keyboard and mouse.
+기존 방식과의 호환성을 위해 TCP/IP 5555를 사용합니다. 같은 네트워크의 다른 장치가 접근할 가능성이 있으므로 신뢰할 수 있는 개인 Wi-Fi에서만 사용하세요.
 
-## 📥 Download Latest Version (v1.3.0)
-You can download the launcher package zip file for free from the link below. Extract and run it:
-👉 **[Download Pokémon Champions PC Standalone Package (ZIP)](https://github.com/DOHA1012/pokemon-champions-pc/releases/download/v1.3.0/Pokemon_Champions_PC.zip)**
+- 사용 후 런처의 `연결 해제` 버튼을 누르세요.
+- 공용 Wi-Fi에서는 무선 ADB를 켜 두지 마세요.
+- 가능하면 USB를 다시 연결한 뒤 `adb usb`로 TCP 모드를 종료하세요.
 
-### ✨ Core Features
-* **Expanded Resolutions**: Supports resolutions from 720p up to 4K (`3840x2160`, `2560x1440`, `1920x1080`, `1600x900`, `1280x720`, `960x540`).
-* **Borderless Fullscreen**: Hides the title bar and stretches the window to full screen for immersive play.
-* **Physical Screen Off & Stay Awake**: The phone's screen automatically goes black upon launch to save battery and prevent burn-in, while preventing the device from falling asleep during mirroring.
-* **Max FPS Limit Option**: Allows configuration of the maximum frame rate limit (30 FPS up to 144 FPS, or unlimited) to optimize bandwidth utilization and eliminate wireless lag.
-* **Display Wakeup & Unlock**: Automatically turns on the phone screen and attempts to bypass the lock screen on startup.
+## 종료 및 ADB server 정책
 
----
+런처가 현재 bundled `adb.exe`로 새 ADB server를 시작한 것이 확인되면 정상 종료 과정에서 그 server를 자동으로 종료합니다. 실행 전부터 존재하던 ADB server는 Android Studio나 Unity가 공유할 수 있으므로 기본적으로 유지합니다.
 
-### 📂 Folder Structure
-When extracted, the folder structure is organized as follows:
-* 📄 **Pokémon Champions.exe** - The main GUI launcher program (Double-click to run).
-* 📁 **bin** - Core engine folder (Do not modify or delete).
-  * 📁 `adb` - Android connection engine.
-  * 📁 `scrcpy` - Mirroring and virtual window engine.
+`종료 시 기존 ADB 서버도 종료 (고급)`을 선택하면 기존 server에도 `adb kill-server`를 실행합니다. 다른 Android 개발 도구의 연결도 끊길 수 있으므로 필요한 경우에만 사용하세요.
 
----
+정상 종료 순서는 scrcpy 종료와 pipe 닫기, worker 정리, 런처가 만든 무선 연결 해제, 설정 저장, ADB server 정책 적용, 로그 flush, Tkinter 종료 순입니다. 강제 종료인 `os._exit()`은 사용하지 않습니다.
 
-### 🚀 How to Run
+## 설정과 로그
 
-#### Step 1: Setup Android Phone (First Time Only)
-1. Go to **Settings** ➡️ **About phone** ➡️ **Software information** on your smartphone.
-2. Tap **Build number** **7 times** consecutively to enable Developer options.
-3. Return to the main Settings menu and tap **Developer options** at the bottom.
-4. Locate **USB debugging** and toggle it **ON**.
+- `config.json`은 마지막 게임, 실행 모드, 게임별 해상도, 사용자 지정 해상도, FPS와 화면 옵션, 무선 IP를 저장합니다.
+- 이전 Champions 전용 `config.json`도 자동으로 새 구조에 병합합니다.
+- `launcher.log`는 ADB, IP 탐색, Activity, display ID, 게임 실행과 종료 결과를 기록합니다.
 
-#### Step 2: Configure Wireless Connection Automatically
-1. Connect both your PC and smartphone to the **same Wi-Fi router**.
-2. Connect the smartphone to your PC using a **USB cable**.
-   * *If the phone prompts "Allow USB debugging?", check **"Always allow from this computer"** and tap **[Allow]**.*
-3. Double-click **`Pokémon Champions.exe`** to launch it.
-4. Click the **`★ USB 기기로 무선 연결 자동 설정`** button in the middle.
-5. Once the setup completes, **disconnect the USB cable**. (The device is now connected wirelessly.)
+이 파일들은 실행 중 생성되며 Git에는 포함하지 않습니다.
 
-#### Step 3: Launch Pokémon Champions Wirelessly
-1. Make sure your wireless device (`192.168.x.x:5555`) is selected in the device dropdown list at the top.
-2. Configure your desired resolution and toggle Borderless Fullscreen under **3. Resolution & Window Settings**.
-3. Click the green **`포켓몬 챔피언스 실행 (PC 독립 창)`** button at the bottom.
-4. The smartphone's screen will wake up and run the game, while a high-definition window displays on your PC. (The physical phone display will go black automatically.)
+## 개발 및 테스트
+
+Python 3.10 이상을 권장합니다. 런타임 코드는 Python 표준 라이브러리만 사용합니다.
+
+```powershell
+python -m unittest discover -v
+python pokemon_launcher.py
+```
+
+Android 기기가 필요 없는 테스트는 프로필, ADB 출력 파싱, Activity와 display ID 파싱, RFC1918 IP 판별, 해상도, 설정 마이그레이션, scrcpy 인자와 process 수명주기를 검증합니다.
+
+실제 기기에서는 Champions와 TCG Pocket 각각 USB·Wi-Fi·Virtual Display·기본 미러링 조합을 확인해야 합니다. 종료 후 작업 관리자에서 런처, scrcpy, 불필요한 bundled ADB process가 남지 않는지와 프로그램 폴더의 이름 변경 및 삭제 가능 여부도 확인해야 합니다.
+
+## 새 게임 프로필 추가
+
+공식 지원 대상을 늘릴 때는 `game_profiles.py`에 package, 화면 방향, 기본 해상도, 해상도 목록과 DPI를 추가합니다. Activity 이름은 프로필에 넣지 않습니다. 런처가 Android Package Manager에서 실제 launchable Activity를 탐색합니다.
+
+## 제3자 구성요소와 라이선스
+
+저장소의 바이너리 구성과 확인 상태는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참조하세요. 새 배포본을 만들기 전에 해당 버전의 원문 라이선스와 NOTICE 파일을 배포물에 함께 넣어야 합니다.
+
+## 비공식 프로젝트 고지
+
+이 프로젝트는 Nintendo, The Pokémon Company, Creatures Inc., GAME FREAK inc. 또는 각 게임 개발·배급사와 제휴하거나 승인받은 프로젝트가 아닙니다. Pokémon 및 관련 명칭과 표장은 각 권리자의 상표입니다.
 
 ---
 
-### 🛠️ Troubleshooting (FAQ)
+## English summary
 
-#### Q. I rebooted my phone, and it won't connect anymore.
-Due to Android security policies, wireless ports close when the phone is rebooted.
-* **Solution:** Re-connect the phone to your PC via USB cable, open the launcher, and click the **`★ USB 기기로 무선 연결 자동 설정`** button again to re-open the wireless port.
+Pokémon PC Launcher 0.1 is an unofficial Windows launcher that controls ADB and scrcpy to display games already installed on the user's Android device. It currently supports Pokémon Champions and Pokémon TCG Pocket profiles. No game files are included.
 
-#### Q. The Wi-Fi IP address changed, and connection was lost.
-This happens if your phone connects to a different Wi-Fi network or the router reboots.
-* **Solution:** Find the new IP address in your phone's Wi-Fi details, enter it into the **Wireless IP** field, and click **`무선 연결`** (Wireless Connect) to reconnect.
+Choose Virtual Display for an independent Android display or Basic Screen Mirroring for compatibility. The launcher resolves the real launchable Activity from Android Package Manager and never guesses an Activity name. A Virtual Display detection failure is reported instead of silently launching on display 0.
 
-#### Q. When I press the phone's physical power button, the PC mirroring window turns off.
-* **Reason**: Android OS pauses all GPU rendering when the physical power button is pressed.
-* **Solution**: The launcher automatically turns off the physical phone screen on startup. **Do not press the power button; just leave the phone as it is.**
-
-#### Q. The window mirrors correctly, but mouse clicks (touch input) do not work at all.
-* **Reason**: Some devices (Samsung, Xiaomi, etc.) block external touch injection by default for security, even if general debugging is on.
-* **Solution**: Go to your phone's **Settings ➡️ Developer options** and toggle **`USB debugging (Security settings)`** (or 'Allow mock input / secure debugging') **ON**. (Note: The main `USB debugging` toggle must remain ON.)
-
-#### Q. Wireless connection fails or device setup displays an error.
-* **Solution**: The debugging authentication tokens on the phone may have become corrupted.
-  1. Go to your phone's **Settings ➡️ Developer options**.
-  2. Tap **`Revoke USB debugging authorizations`** to clear previous authorization records.
-  3. Unplug the USB cable and plug it back in. When the *"Allow USB debugging?"* prompt appears, check **"Always allow from this computer"** and tap **[Allow]**. Then retry the automatic setup.
-
+Wireless ADB uses TCP port 5555. Use it only on trusted networks and disconnect it after use. Version 1.0 is reserved for completion of real-device stabilization tests.

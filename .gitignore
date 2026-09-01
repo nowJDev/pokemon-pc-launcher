@@ -6,3 +6,11 @@ __pycache__/
 .vscode/
 .idea/
 .worktrees/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+config.json
+launcher.log
+ip_debug.log

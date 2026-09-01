@@ -1,837 +1,845 @@
+# 멀티게임 Pokémon PC Launcher의 Tkinter 사용자 인터페이스를 제공한다.
+
+import ctypes
+import logging
 import os
+from pathlib import Path
 import sys
-import subprocess
-import re
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
-import ctypes
-import json
-import time
+from tkinter import messagebox, ttk
 
-# Set AppUserModelID to ensure the custom taskbar icon is displayed correctly on Windows
-try:
-    myappid = 'DOHA1012.PokemonChampions.Launcher.1.1'
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-except Exception:
-    pass
+from game_profiles import get_profile_by_display_name, load_game_profiles
+from launcher_core import (
+    DEFAULT_FPS,
+    MIRROR_MODE,
+    VIRTUAL_DISPLAY_MODE,
+    AdbServerManager,
+    AdbService,
+    ScrcpyOptions,
+    ScrcpyService,
+    VirtualDisplayError,
+    WorkerRegistry,
+    build_scrcpy_args,
+    device_state_error,
+    load_config,
+    normalize_wireless_endpoint,
+    orient_resolution,
+    resolve_binary_paths,
+    save_config,
+    validate_resolution,
+)
 
-# ----------------------------------------------------
-# Path helper
-# ----------------------------------------------------
-def get_base_path():
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    else:
-        return os.path.dirname(os.path.abspath(__file__))
 
-BASE_PATH = get_base_path()
-ADB_PATH = os.path.join(BASE_PATH, "bin", "adb", "adb.exe")
-SCRCPY_PATH = os.path.join(BASE_PATH, "bin", "scrcpy", "scrcpy.exe")
+APP_NAME = "Pokémon PC Launcher"
+APP_VERSION = "0.1"
+MODE_LABELS = {
+    VIRTUAL_DISPLAY_MODE: "Virtual Display",
+    MIRROR_MODE: "기본 화면 미러링",
+}
+MODE_KEYS = {label: key for key, label in MODE_LABELS.items()}
+FPS_VALUES = (DEFAULT_FPS, "30", "45", "60", "90", "120", "144")
 
-# Fallback paths
-if not os.path.exists(ADB_PATH):
-    ADB_PATH = os.path.join(BASE_PATH, "bin", "adb.exe")
-if not os.path.exists(SCRCPY_PATH):
-    SCRCPY_PATH = os.path.join(BASE_PATH, "bin", "scrcpy.exe")
 
-if not os.path.exists(ADB_PATH):
-    ADB_PATH = os.path.join(BASE_PATH, "adb.exe")
-if not os.path.exists(SCRCPY_PATH):
-    SCRCPY_PATH = os.path.join(BASE_PATH, "scrcpy.exe")
+def get_application_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
 
-if not os.path.exists(ADB_PATH):
-    ADB_PATH = r"C:\scrcpy\adb.exe"
-if not os.path.exists(SCRCPY_PATH):
-    SCRCPY_PATH = r"C:\scrcpy\scrcpy.exe"
 
-# Set ADB environment variable so scrcpy can find it
-os.environ["ADB"] = ADB_PATH
+def configure_logger(application_dir):
+    log_path = Path(application_dir) / "launcher.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(threadName)s %(message)s",
+        handlers=[logging.FileHandler(log_path, encoding="utf-8")],
+        force=True,
+    )
+    logger = logging.getLogger(APP_NAME)
+    logger.info("%s %s 시작", APP_NAME, APP_VERSION)
+    return logger
 
-# Package info
-PKG_NAME = "jp.pokemon.pokemonchampions"
 
-# ----------------------------------------------------
-# Subprocess helper (Hides cmd windows)
-# ----------------------------------------------------
-def run_cmd(args):
+def set_windows_app_id(logger):
+    if os.name != "nt":
+        return
     try:
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        
-        result = subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-            startupinfo=startupinfo,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-            timeout=5
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            f"nowJDev.PokemonPCLauncher.{APP_VERSION}"
         )
-        return result.stdout, result.stderr, result.returncode
-    except Exception as e:
-        return "", str(e), -1
+    except (AttributeError, OSError):
+        logger.exception("Windows AppUserModelID 설정에 실패했습니다.")
 
-def is_private_ip(ip):
-    if not ip:
-        return False
-    # Remove CIDR slash suffixes like /24 or /8 if present
-    ip = ip.split('/')[0].strip()
-    if ip.startswith("127."):
-        return False
-    if ip.startswith("169.254."):
-        return False
-    try:
-        parts = list(map(int, ip.split('.')))
-        if len(parts) != 4:
-            return False
-        # Class C
-        if parts[0] == 192 and parts[1] == 168:
-            return True
-        # Class B
-        if parts[0] == 172:
-            return True
-        # Class A
-        if parts[0] == 10:
-            return True
-    except:
-        pass
-    return False
 
-# ----------------------------------------------------
-# Main GUI Class
-# ----------------------------------------------------
 class AppLauncher:
-    def __init__(self, root):
+    def __init__(self, root, application_dir, logger):
         self.root = root
-        self.root.title("Pokémon Champions 무선 실행기")
-        self.root.geometry("450x555")
-        self.root.resizable(False, False)
-        
-        # Style
-        self.style = ttk.Style()
-        self.style.theme_use('vista')
-        
-        # Main Frame
-        self.main_frame = ttk.Frame(self.root, padding="15")
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Title Label
-        title_label = ttk.Label(
-            self.main_frame, 
-            text="Pokémon Champions Launcher", 
-            font=("Malgun Gothic", 14, "bold"),
-            foreground="#1e88e5"
-        )
-        title_label.pack(pady=(0, 15))
-        
-        # 1. Device Selection Frame
-        dev_frame = ttk.LabelFrame(self.main_frame, text=" 1. 연결할 기기 선택 ", padding="8")
-        dev_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self.dev_var = tk.StringVar()
-        self.cb_devices = ttk.Combobox(dev_frame, textvariable=self.dev_var, state="readonly", height=5)
-        self.cb_devices.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        self.btn_refresh = ttk.Button(dev_frame, text="새로고침", command=self.refresh_devices)
-        self.btn_refresh.pack(side=tk.RIGHT)
-        
-        # 2. Wireless Connect / Setup Frame
-        wire_frame = ttk.LabelFrame(self.main_frame, text=" 2. 무선 연결 및 설정 ", padding="8")
-        wire_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # IP / Port Row
-        ip_row = ttk.Frame(wire_frame)
-        ip_row.pack(fill=tk.X, pady=(0, 5))
-        
-        ttk.Label(ip_row, text="무선 IP 주소:").pack(side=tk.LEFT, padx=(0, 5))
-        self.txt_ip = ttk.Entry(ip_row, width=15)
-        self.txt_ip.insert(0, "192.168.0.16")
-        self.txt_ip.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.btn_connect = ttk.Button(ip_row, text="무선 연결", command=self.start_wireless_connect)
-        self.btn_connect.pack(side=tk.RIGHT)
-        
-        # Auto Setup Row
-        auto_row = ttk.Frame(wire_frame)
-        auto_row.pack(fill=tk.X)
-        
-        self.btn_auto = ttk.Button(
-            auto_row, 
-            text="★ USB 기기로 무선 연결 자동 설정", 
-            command=self.start_auto_setup
-        )
-        self.btn_auto.pack(fill=tk.X)
-        
-        # 3. Resolution Selection Frame
-        res_frame = ttk.LabelFrame(self.main_frame, text=" 3. 해상도 및 화면 설정 ", padding="8")
-        res_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        # Resolution Combobox (state="readonly")
-        self.res_var = tk.StringVar(value="1280x720")
-        self.cb_res = ttk.Combobox(
-            res_frame, 
-            textvariable=self.res_var, 
-            values=["3840x2160", "2560x1440", "1920x1080", "1600x900", "1280x720", "960x540"],
-            state="readonly"
-        )
-        self.cb_res.pack(fill=tk.X, pady=(0, 5))
-        
-        # Custom Resolution Checkbox
-        self.custom_res_var = tk.BooleanVar(value=False)
-        self.chk_custom_res = ttk.Checkbutton(
-            res_frame,
-            text="사용자 지정 해상도 사용",
-            variable=self.custom_res_var,
-            command=self.toggle_custom_resolution
-        )
-        self.chk_custom_res.pack(fill=tk.X, pady=(0, 5))
-        
-        # Custom Resolution Input Box Row (Horizontal Layout)
-        self.custom_res_row = ttk.Frame(res_frame)
-        self.custom_res_row.pack(fill=tk.X, pady=(0, 5))
-        
-        ttk.Label(self.custom_res_row, text="가로:").pack(side=tk.LEFT, padx=(0, 5))
-        self.txt_res_w = ttk.Entry(self.custom_res_row, width=8)
-        self.txt_res_w.insert(0, "1280")
-        self.txt_res_w.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(self.custom_res_row, text="x").pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(self.custom_res_row, text="세로:").pack(side=tk.LEFT, padx=(0, 5))
-        self.txt_res_h = ttk.Entry(self.custom_res_row, width=8)
-        self.txt_res_h.insert(0, "720")
-        self.txt_res_h.pack(side=tk.LEFT)
-        
-        self.btn_get_res = ttk.Button(
-            self.custom_res_row,
-            text="기기 비율 가져오기",
-            command=self.get_device_resolution,
-            width=16
-        )
-        self.btn_get_res.pack(side=tk.RIGHT)
-        
-        # Enable/Disable initial state of custom inputs
-        self.txt_res_w.config(state=tk.DISABLED)
-        self.txt_res_h.config(state=tk.DISABLED)
-        self.btn_get_res.config(state=tk.DISABLED)
-        
-        self.borderless_var = tk.BooleanVar(value=False)
-        self.chk_borderless = ttk.Checkbutton(
-            res_frame,
-            text="테두리 없는 전체화면 (Borderless Fullscreen)",
-            variable=self.borderless_var
-        )
-        self.chk_borderless.pack(fill=tk.X, pady=(5, 0))
-        
-        self.turn_screen_off_var = tk.BooleanVar(value=False)
-        self.chk_turn_screen_off = ttk.Checkbutton(
-            res_frame,
-            text="실행 시 스마트폰 화면 끄기 (Turn Screen Off)",
-            variable=self.turn_screen_off_var
-        )
-        self.chk_turn_screen_off.pack(fill=tk.X, pady=(5, 0))
-        
-        # FPS Row
-        fps_row = ttk.Frame(res_frame)
-        fps_row.pack(fill=tk.X, pady=(5, 0))
-        
-        ttk.Label(fps_row, text="최대 프레임 제한 (FPS):").pack(side=tk.LEFT, padx=(0, 5))
-        self.fps_var = tk.StringVar(value="제한 없음 (기본값)")
-        self.cb_fps = ttk.Combobox(
-            fps_row,
-            textvariable=self.fps_var,
-            values=["제한 없음 (기본값)", "144", "120", "90", "60", "30"],
-            state="readonly",
-            width=18
-        )
-        self.cb_fps.pack(side=tk.LEFT)
-        
-        # 4. Launch Button
-        self.btn_launch = tk.Button(
-            self.main_frame,
-            text="포켓몬 챔피언스 실행 (PC 독립 창)",
-            font=("Malgun Gothic", 11, "bold"),
-            bg="#4caf50",
-            fg="white",
-            relief=tk.RAISED,
-            bd=1,
-            command=self.launch_game
-        )
-        self.btn_launch.pack(fill=tk.X, ipady=8)
-        
-        # Status Label
-        self.lbl_status = ttk.Label(self.main_frame, text="준비됨", font=("Malgun Gothic", 8), foreground="gray")
-        self.lbl_status.pack(anchor=tk.W, pady=(5, 0))
-        
-        # Initial load
-        self.load_config()
-        self.refresh_devices()
-        
-        # Ensure clean exit when closing the launcher window
-        self.root.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
+        self.application_dir = Path(application_dir)
+        self.logger = logger
+        self.config_path = self.application_dir / "config.json"
+        self.icon_path = self.application_dir / "pokemon_icon.ico"
+        if not self.icon_path.is_file():
+            self.icon_path = self.application_dir / "bin" / "scrcpy" / "pokemon_icon.ico"
+        self.profiles = load_game_profiles()
+        self.config = load_config(self.config_path, logger=self.logger)
+        self.current_profile_key = self.config["last_game"]
+        self.binary_paths = resolve_binary_paths(self.application_dir)
+        self.workers = WorkerRegistry()
+        self.closing = threading.Event()
+        self.session_lock = threading.Lock()
+        self.scrcpy_session = None
+        self.devices_by_label = {}
+        self.created_wireless_endpoints = set()
+        self._scrcpy_icon_handle = None
 
-    def toggle_custom_resolution(self):
-        if self.custom_res_var.get():
-            self.cb_res.config(state=tk.DISABLED)
-            self.txt_res_w.config(state=tk.NORMAL)
-            self.txt_res_h.config(state=tk.NORMAL)
-            self.btn_get_res.config(state=tk.NORMAL)
+        self.adb_manager = None
+        self.adb_service = None
+        self.scrcpy_service = None
+        if not self.binary_paths.missing:
+            self.adb_manager = AdbServerManager(
+                self.binary_paths.adb_path,
+                logger=self.logger,
+            )
+            self.adb_service = AdbService(
+                self.binary_paths.adb_path,
+                runner=self.adb_manager,
+                logger=self.logger,
+            )
+            self.scrcpy_service = ScrcpyService(logger=self.logger)
+            os.environ["ADB"] = self.binary_paths.adb_path
+
+        self._create_variables()
+        self._build_ui()
+        self._load_selected_game_settings()
+        self.root.protocol("WM_DELETE_WINDOW", self.request_shutdown)
+
+        if self.binary_paths.missing:
+            missing = ", ".join(self.binary_paths.missing)
+            self.root.after(
+                0,
+                lambda: messagebox.showerror(
+                    APP_NAME,
+                    f"필수 실행 파일을 찾을 수 없습니다: {missing}\n"
+                    "프로그램 폴더의 bin 디렉터리를 확인해 주세요.",
+                ),
+            )
+            self.launch_button.configure(state="disabled")
+            self._set_status(f"필수 실행 파일 없음: {missing}")
         else:
-            self.cb_res.config(state="readonly")
-            self.txt_res_w.config(state=tk.DISABLED)
-            self.txt_res_h.config(state=tk.DISABLED)
-            self.btn_get_res.config(state=tk.DISABLED)
+            self.root.after(100, self.refresh_devices)
 
-    def get_device_resolution(self):
-        selected = self.dev_var.get()
-        if not selected:
-            messagebox.showwarning("경고", "먼저 연결할 기기를 선택해 주세요.")
+    def _create_variables(self):
+        initial_key = self.config["last_game"]
+        initial_profile = self.profiles[initial_key]
+        self.game_var = tk.StringVar(value=initial_profile.display_name)
+        self.device_var = tk.StringVar()
+        self.install_status_var = tk.StringVar(value="설치 여부: 기기를 선택해 주세요.")
+        self.wireless_ip_var = tk.StringVar(value=self.config["wireless_ip"])
+        self.resolution_var = tk.StringVar()
+        self.custom_enabled_var = tk.BooleanVar()
+        self.custom_width_var = tk.StringVar()
+        self.custom_height_var = tk.StringVar()
+        self.mode_var = tk.StringVar(value=MODE_LABELS[self.config["launch_mode"]])
+        self.fps_var = tk.StringVar(value=self.config["fps"])
+        self.borderless_var = tk.BooleanVar(value=self.config["borderless"])
+        self.turn_screen_off_var = tk.BooleanVar(value=self.config["turn_screen_off"])
+        self.kill_adb_server_var = tk.BooleanVar(
+            value=self.config["kill_adb_server_on_exit"]
+        )
+        self.status_var = tk.StringVar(value="준비되었습니다.")
+
+    def _build_ui(self):
+        self.root.geometry("520x785")
+        self.root.minsize(500, 740)
+        self.root.title(f"{APP_NAME} {APP_VERSION}")
+        self.root.columnconfigure(0, weight=1)
+
+        container = ttk.Frame(self.root, padding=12)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.columnconfigure(0, weight=1)
+
+        game_frame = ttk.LabelFrame(container, text="1. 실행할 게임 선택", padding=10)
+        game_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        game_frame.columnconfigure(0, weight=1)
+        self.game_combo = ttk.Combobox(
+            game_frame,
+            state="readonly",
+            textvariable=self.game_var,
+            values=[profile.display_name for profile in self.profiles.values()],
+        )
+        self.game_combo.grid(row=0, column=0, sticky="ew")
+        self.game_combo.bind("<<ComboboxSelected>>", self._on_game_changed)
+
+        device_frame = ttk.LabelFrame(container, text="2. 연결할 기기 선택", padding=10)
+        device_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        device_frame.columnconfigure(0, weight=1)
+        self.device_combo = ttk.Combobox(
+            device_frame,
+            state="readonly",
+            textvariable=self.device_var,
+        )
+        self.device_combo.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.device_combo.bind("<<ComboboxSelected>>", self._on_device_changed)
+        ttk.Button(device_frame, text="새로고침", command=self.refresh_devices).grid(
+            row=0, column=1
+        )
+        ttk.Label(device_frame, textvariable=self.install_status_var).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(6, 0)
+        )
+
+        wireless_frame = ttk.LabelFrame(
+            container,
+            text="3. 무선 연결 및 설정",
+            padding=10,
+        )
+        wireless_frame.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        wireless_frame.columnconfigure(1, weight=1)
+        ttk.Label(wireless_frame, text="IP 주소").grid(row=0, column=0, padx=(0, 8))
+        ttk.Entry(wireless_frame, textvariable=self.wireless_ip_var).grid(
+            row=0, column=1, sticky="ew", padx=(0, 8)
+        )
+        ttk.Button(wireless_frame, text="연결", command=self.connect_wireless).grid(
+            row=0, column=2, padx=(0, 4)
+        )
+        ttk.Button(wireless_frame, text="연결 해제", command=self.disconnect_wireless).grid(
+            row=0, column=3
+        )
+        ttk.Button(
+            wireless_frame,
+            text="USB 기기를 무선 ADB로 자동 설정",
+            command=self.configure_wireless_from_usb,
+        ).grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        ttk.Label(
+            wireless_frame,
+            text="무선 ADB 사용 후에는 공용 Wi-Fi에서 연결을 해제하세요.",
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        display_frame = ttk.LabelFrame(
+            container,
+            text="4. 해상도 및 화면 설정",
+            padding=10,
+        )
+        display_frame.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        display_frame.columnconfigure(1, weight=1)
+        ttk.Label(display_frame, text="해상도").grid(row=0, column=0, sticky="w")
+        self.resolution_combo = ttk.Combobox(
+            display_frame,
+            state="readonly",
+            textvariable=self.resolution_var,
+        )
+        self.resolution_combo.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Button(
+            display_frame,
+            text="기기 원본",
+            command=self.use_device_resolution,
+        ).grid(row=0, column=2)
+
+        ttk.Checkbutton(
+            display_frame,
+            text="사용자 지정",
+            variable=self.custom_enabled_var,
+            command=self._update_custom_state,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        custom_frame = ttk.Frame(display_frame)
+        custom_frame.grid(row=1, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 0))
+        self.custom_width_entry = ttk.Entry(
+            custom_frame,
+            width=8,
+            textvariable=self.custom_width_var,
+        )
+        self.custom_width_entry.grid(row=0, column=0)
+        ttk.Label(custom_frame, text=" x ").grid(row=0, column=1)
+        self.custom_height_entry = ttk.Entry(
+            custom_frame,
+            width=8,
+            textvariable=self.custom_height_var,
+        )
+        self.custom_height_entry.grid(row=0, column=2)
+
+        ttk.Label(display_frame, text="실행 모드").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(
+            display_frame,
+            state="readonly",
+            textvariable=self.mode_var,
+            values=list(MODE_KEYS),
+        ).grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(display_frame, text="FPS 제한").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(
+            display_frame,
+            state="readonly",
+            textvariable=self.fps_var,
+            values=FPS_VALUES,
+        ).grid(row=3, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Checkbutton(
+            display_frame,
+            text="Borderless Fullscreen",
+            variable=self.borderless_var,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(
+            display_frame,
+            text="스마트폰 실제 화면 끄기",
+            variable=self.turn_screen_off_var,
+        ).grid(row=5, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(
+            display_frame,
+            text="종료 시 기존 ADB 서버도 종료 (고급)",
+            variable=self.kill_adb_server_var,
+        ).grid(row=6, column=0, columnspan=3, sticky="w")
+
+        launch_frame = ttk.LabelFrame(container, text="5. 게임 실행", padding=10)
+        launch_frame.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+        launch_frame.columnconfigure(0, weight=1)
+        self.launch_button = ttk.Button(
+            launch_frame,
+            text="게임 실행",
+            command=self.launch_game,
+        )
+        self.launch_button.grid(row=0, column=0, sticky="ew")
+
+        ttk.Label(container, textvariable=self.status_var, wraplength=480).grid(
+            row=5, column=0, sticky="ew"
+        )
+
+    def _post_ui(self, callback, allow_during_shutdown=False):
+        if self.closing.is_set() and not allow_during_shutdown:
             return
-        
-        device_id = selected.split()[0]
-        self.set_status("기기 해상도 가져오는 중...", "blue")
-        
-        def run():
-            stdout, stderr, code = run_cmd([ADB_PATH, "-s", device_id, "shell", "wm size"])
-            
-            # Parsing "Physical size: 1080x2316" or "Override size: 1080x2316"
-            matches = re.findall(r"(\d+)x(\d+)", stdout)
-            if matches:
-                # Get the last match (prefers Override size if present)
-                w_raw, h_raw = matches[-1]
-                val1, val2 = int(w_raw), int(h_raw)
-                w = max(val1, val2)
-                h = min(val1, val2)
-                
-                def update_ui():
-                    # Temporarily enable entry to update values
-                    self.txt_res_w.config(state=tk.NORMAL)
-                    self.txt_res_h.config(state=tk.NORMAL)
-                    
-                    self.txt_res_w.delete(0, tk.END)
-                    self.txt_res_w.insert(0, str(w))
-                    self.txt_res_h.delete(0, tk.END)
-                    self.txt_res_h.insert(0, str(h))
-                    
-                    # Restore states based on checkbox
-                    self.toggle_custom_resolution()
-                    
-                    messagebox.showinfo(
-                        "해상도 가져오기 성공", 
-                        f"기기의 원본 해상도를 감지하여 입력했습니다:\n가로 {w} x 세로 {h}"
-                    )
-                    self.set_status("기기 해상도 가져오기 성공", "green")
-                
-                self.root.after(0, update_ui)
-            else:
-                def err():
-                    messagebox.showerror(
-                        "오류", 
-                        f"기기 해상도를 가져오지 못했습니다.\nstdout: {stdout}\nstderr: {stderr}"
-                    )
-                    self.set_status("해상도 가져오기 실패", "red")
-                self.root.after(0, err)
-                
-        threading.Thread(target=run, daemon=True).start()
-
-    def load_config(self):
-        config_path = os.path.join(BASE_PATH, "config.json")
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                    ip = config.get("wireless_ip", "192.168.0.16")
-                    res = config.get("resolution", "1280x720")
-                    borderless = config.get("borderless", False)
-                    turn_screen_off = config.get("turn_screen_off", False)
-                    fps = config.get("fps", "제한 없음 (기본값)")
-                    custom_enabled = config.get("custom_resolution_enabled", False)
-                    custom_w = config.get("custom_width", "1280")
-                    custom_h = config.get("custom_height", "720")
-                    
-                    self.txt_ip.delete(0, tk.END)
-                    self.txt_ip.insert(0, ip)
-                    self.res_var.set(res)
-                    self.borderless_var.set(borderless)
-                    self.turn_screen_off_var.set(turn_screen_off)
-                    self.fps_var.set(fps)
-                    
-                    self.custom_res_var.set(custom_enabled)
-                    self.txt_res_w.config(state=tk.NORMAL)
-                    self.txt_res_w.delete(0, tk.END)
-                    self.txt_res_w.insert(0, custom_w)
-                    self.txt_res_h.config(state=tk.NORMAL)
-                    self.txt_res_h.delete(0, tk.END)
-                    self.txt_res_h.insert(0, custom_h)
-                    
-                    # Update widget disabled states based on custom checkbox
-                    self.toggle_custom_resolution()
-            except Exception:
-                pass
-
-    def save_config(self):
-        config_path = os.path.join(BASE_PATH, "config.json")
-        
-        # Read w/h safely while disabled state might block read on some platforms
-        custom_w = self.txt_res_w.get().strip()
-        custom_h = self.txt_res_h.get().strip()
-        
-        config = {
-            "wireless_ip": self.txt_ip.get().strip(),
-            "resolution": self.res_var.get(),
-            "borderless": self.borderless_var.get(),
-            "turn_screen_off": self.turn_screen_off_var.get(),
-            "fps": self.fps_var.get(),
-            "custom_resolution_enabled": self.custom_res_var.get(),
-            "custom_width": custom_w if custom_w else "1280",
-            "custom_height": custom_h if custom_h else "720"
-        }
         try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=4, ensure_ascii=False)
-        except Exception:
-            pass
+            self.root.after(0, callback)
+        except tk.TclError:
+            self.logger.info("종료된 Tkinter 창에 대한 UI 갱신을 생략했습니다.")
 
-    def set_status(self, text, color="gray"):
-        self.lbl_status.config(text=text, foreground=color)
-        self.root.update_idletasks()
+    def _set_status(self, message):
+        self.status_var.set(message)
+
+    def _start_worker(self, name, target, failure_message):
+        if self.closing.is_set():
+            return
+
+        def guarded_target():
+            try:
+                target()
+            except Exception:
+                self.logger.exception("%s 작업 중 예외가 발생했습니다.", name)
+                self._post_ui(lambda: messagebox.showerror(APP_NAME, failure_message))
+
+        self.workers.start(name, guarded_target)
+
+    def _selected_profile(self):
+        return get_profile_by_display_name(self.game_var.get())
+
+    def _selected_device(self):
+        return self.devices_by_label.get(self.device_var.get())
+
+    def _store_current_game_settings(self):
+        profile_key = self.current_profile_key
+        if profile_key not in self.profiles:
+            return
+        self.config["game_resolutions"][profile_key] = self.resolution_var.get()
+        self.config["custom_resolution_enabled"][profile_key] = self.custom_enabled_var.get()
+        self.config["custom_resolutions"][profile_key] = {
+            "width": self.custom_width_var.get(),
+            "height": self.custom_height_var.get(),
+        }
+
+    def _load_selected_game_settings(self):
+        profile = self._selected_profile()
+        self.resolution_combo.configure(values=profile.resolutions)
+        selected = self.config["game_resolutions"].get(profile.key, profile.default_resolution)
+        if selected not in profile.resolutions:
+            selected = profile.default_resolution
+        self.resolution_var.set(selected)
+        self.custom_enabled_var.set(
+            self.config["custom_resolution_enabled"].get(profile.key, False)
+        )
+        custom = self.config["custom_resolutions"].get(profile.key, {})
+        width, height = profile.default_resolution.split("x", 1)
+        self.custom_width_var.set(str(custom.get("width", width)))
+        self.custom_height_var.set(str(custom.get("height", height)))
+        self._update_custom_state()
+        self.current_profile_key = profile.key
+        self.root.title(f"{APP_NAME} {APP_VERSION} - {profile.display_name}")
+        self.launch_button.configure(text=f"{profile.display_name} 실행")
+        self.logger.info(
+            "선택 게임: %s, package=%s, orientation=%s",
+            profile.display_name,
+            profile.package,
+            profile.orientation,
+        )
+
+    def _on_game_changed(self, _event=None):
+        self._store_current_game_settings()
+        profile = self._selected_profile()
+        self.config["last_game"] = profile.key
+        self._load_selected_game_settings()
+        self._on_device_changed()
+
+    def _update_custom_state(self):
+        state = "normal" if self.custom_enabled_var.get() else "disabled"
+        self.resolution_combo.configure(
+            state="disabled" if self.custom_enabled_var.get() else "readonly"
+        )
+        self.custom_width_entry.configure(state=state)
+        self.custom_height_entry.configure(state=state)
 
     def refresh_devices(self):
-        self.set_status("기기 목록 불러오는 중...", "blue")
-        def run():
-            stdout, stderr, code = run_cmd([ADB_PATH, "devices"])
-            devices = []
-            lines = stdout.splitlines()
-            for line in lines:
-                if "List of devices attached" in line or not line.strip():
-                    continue
-                parts = line.split()
-                if len(parts) >= 2:
-                    devices.append(f"{parts[0]} ({parts[1]})")
-            
-            # Update UI in main thread
-            self.root.after(0, lambda: self.update_device_list(devices))
-            
-        threading.Thread(target=run, daemon=True).start()
-
-    def update_device_list(self, devices):
-        self.cb_devices['values'] = devices
-        if devices:
-            self.cb_devices.current(0)
-            self.set_status(f"기기 {len(devices)}대 감지됨", "green")
-        else:
-            self.dev_var.set("")
-            self.set_status("감지된 기기 없음", "red")
-
-    def start_wireless_connect(self):
-        ip = self.txt_ip.get().strip()
-        if not ip:
-            messagebox.showerror("오류", "IP 주소를 입력해 주세요.")
+        if not self.adb_service:
             return
-        
-        self.set_status(f"무선 연결 시도 중 ({ip}:5555)...", "blue")
-        self.btn_connect.config(state=tk.DISABLED)
-        
-        def run():
-            stdout, stderr, code = run_cmd([ADB_PATH, "connect", f"{ip}:5555"])
-            success = "connected to" in stdout.lower()
-            
-            def on_done():
-                self.btn_connect.config(state=tk.NORMAL)
-                if success:
-                    messagebox.showinfo("무선 연결 성공", f"성공적으로 {ip}:5555에 연결되었습니다.")
-                    self.set_status("무선 연결 성공", "green")
-                else:
-                    messagebox.showerror("무선 연결 실패", f"연결 실패:\n{stdout}\n{stderr}")
-                    self.set_status("무선 연결 실패", "red")
-                self.refresh_devices()
-                
-            self.root.after(0, on_done)
-            
-        threading.Thread(target=run, daemon=True).start()
+        self._set_status("ADB 기기 목록을 확인하는 중입니다.")
 
-    def start_auto_setup(self):
-        self.set_status("자동 무선 설정 진행 중...", "blue")
-        self.btn_auto.config(state=tk.DISABLED)
-        
-        def run():
-            log_path = os.path.join(BASE_PATH, "ip_debug.log")
-            if os.path.exists(log_path):
-                try: os.remove(log_path)
-                except: pass
-                
-            def log_w(msg):
-                try:
-                    with open(log_path, "a", encoding="utf-8") as lf:
-                        lf.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-                except: pass
+        def work():
+            devices = self.adb_service.list_devices()
 
-            log_w("Auto setup script triggered.")
-            
-            # 1. Find USB device
-            stdout, stderr, code = run_cmd([ADB_PATH, "devices"])
-            log_w(f"adb devices stdout:\n{stdout.strip()}")
-            log_w(f"adb devices stderr: {stderr.strip()} code: {code}")
-            
-            usb_device = None
-            for line in stdout.splitlines():
-                if "List of devices attached" in line or not line.strip():
-                    continue
-                parts = line.split()
-                if len(parts) >= 2:
-                    dev_id = parts[0]
-                    if ":" not in dev_id and "192.168" not in dev_id:
-                        usb_device = dev_id
-                        break
-            
-            log_w(f"Resolved usb_device ID: {usb_device}")
-            if not usb_device:
-                def err():
-                    self.btn_auto.config(state=tk.NORMAL)
-                    messagebox.showerror(
-                        "오류", 
-                        "USB로 연결된 스마트폰을 찾을 수 없습니다.\n먼저 폰을 USB로 연결해 주세요."
-                    )
-                    self.set_status("USB 기기 없음", "red")
-                self.root.after(0, err)
-                return
-            
-            # 2. Run adb tcpip 5555
-            tcpip_out, tcpip_err, tcpip_code = run_cmd([ADB_PATH, "-s", usb_device, "tcpip", "5555"])
-            log_w(f"adb tcpip stdout: {tcpip_out.strip()} stderr: {tcpip_err.strip()} code: {tcpip_code}")
-            
-            # Wait for device to reconnect after adb tcpip restart
-            log_w("Waiting for device to reconnect...")
-            wait_out, wait_err, wait_code = run_cmd([ADB_PATH, "-s", usb_device, "wait-for-device"])
-            log_w(f"wait-for-device code: {wait_code} stderr: {wait_err.strip()}")
-            time.sleep(1.5)  # Safe buffer for device network initialization
-            
-            # 3. Get IP address of phone
-            phone_ip = None
-            
-            # Strategy 1: Check ip route
-            route_out, route_err, route_code = run_cmd([ADB_PATH, "-s", usb_device, "shell", "ip route"])
-            log_w(f"Strategy 1 (ip route) code: {route_code} stderr: {route_err.strip()}")
-            log_w(f"Strategy 1 raw stdout:\n{route_out}")
-            for line in route_out.splitlines():
-                if "src" in line:
-                    match = re.search(r"src\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", line)
-                    if match:
-                        candidate = match.group(1)
-                        is_priv = is_private_ip(candidate)
-                        log_w(f"Candidate: {candidate}, is_private: {is_priv}")
-                        if is_priv:
-                            phone_ip = candidate
-                            break
-            
-            # Strategy 2: Check all IPv4 interfaces
-            if not phone_ip:
-                addr_out, addr_err, addr_code = run_cmd([ADB_PATH, "-s", usb_device, "shell", "ip -4 addr show"])
-                log_w(f"Strategy 2 (ip -4 addr show) code: {addr_code} stderr: {addr_err.strip()}")
-                log_w(f"Strategy 2 raw stdout:\n{addr_out}")
-                candidates = re.findall(r"inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", addr_out)
-                for candidate in candidates:
-                    is_priv = is_private_ip(candidate)
-                    log_w(f"Candidate: {candidate}, is_private: {is_priv}")
-                    if is_priv:
-                        phone_ip = candidate
-                        break
-                        
-            # Strategy 3: Check dumpsys wifi fallback
-            if not phone_ip:
-                wifi_out, wifi_err, wifi_code = run_cmd([ADB_PATH, "-s", usb_device, "shell", "dumpsys wifi"])
-                log_w(f"Strategy 3 (dumpsys wifi) code: {wifi_code} len: {len(wifi_out)} stderr: {wifi_err.strip()}")
-                candidates = re.findall(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", wifi_out)
-                seen = set()
-                for candidate in candidates:
-                    if candidate in seen: continue
-                    seen.add(candidate)
-                    is_priv = is_private_ip(candidate)
-                    log_w(f"Wifi Candidate: {candidate}, is_private: {is_priv}")
-                    if is_priv:
-                        phone_ip = candidate
-                        break
-            
-            log_w(f"Final selected phone_ip: {phone_ip}")
-            
-            if not phone_ip:
-                def err_ip():
-                    self.btn_auto.config(state=tk.NORMAL)
-                    messagebox.showerror(
-                        "오류", 
-                        "폰의 와이파이 IP 주소를 가져오지 못했습니다.\n폰이 와이파이에 연결되어 있는지 확인해 주세요."
-                    )
-                    self.set_status("IP 획득 실패", "red")
-                self.root.after(0, err_ip)
-                return
-
-            # 4. Connect wirelessly
-            run_cmd([ADB_PATH, "connect", f"{phone_ip}:5555"])
-            
-            def success_done():
-                self.btn_auto.config(state=tk.NORMAL)
-                self.txt_ip.delete(0, tk.END)
-                self.txt_ip.insert(0, phone_ip)
-                messagebox.showinfo(
-                    "설정 완료", 
-                    f"자동 설정이 완료되었습니다!\n무선 IP: {phone_ip}:5555\n\n이제 USB 케이블을 뽑으셔도 무선으로 조작 가능합니다."
+            def apply():
+                old_serial = None
+                selected = self._selected_device()
+                if selected:
+                    old_serial = selected.serial
+                self.devices_by_label = {
+                    f"{device.serial}  [{device.state}]": device for device in devices
+                }
+                labels = list(self.devices_by_label)
+                self.device_combo.configure(values=labels)
+                matching_label = next(
+                    (
+                        label
+                        for label, device in self.devices_by_label.items()
+                        if device.serial == old_serial
+                    ),
+                    None,
                 )
-                self.set_status("자동 설정 성공", "green")
-                self.refresh_devices()
-                
-            self.root.after(0, success_done)
+                self.device_var.set(matching_label or (labels[0] if labels else ""))
+                self._set_status(
+                    f"ADB 기기 {len(devices)}개를 확인했습니다."
+                    if devices
+                    else "연결된 ADB 기기가 없습니다."
+                )
+                self._on_device_changed()
 
-        threading.Thread(target=run, daemon=True).start()
+            self._post_ui(apply)
+
+        self._start_worker("device-refresh", work, "ADB 기기 목록을 읽지 못했습니다.")
+
+    def _on_device_changed(self, _event=None):
+        device = self._selected_device()
+        if not device:
+            self.install_status_var.set("설치 여부: 기기를 선택해 주세요.")
+            return
+        state_message = device_state_error(device.state)
+        if state_message:
+            self.install_status_var.set(state_message)
+            return
+        profile = self._selected_profile()
+        self.install_status_var.set("설치 여부 확인 중입니다.")
+
+        def work():
+            installed = self.adb_service.is_package_installed(device.serial, profile.package)
+            text = f"{profile.display_name}: {'설치됨' if installed else '설치되지 않음'}"
+            self._post_ui(lambda: self.install_status_var.set(text))
+
+        self._start_worker("package-check", work, "앱 설치 여부를 확인하지 못했습니다.")
+
+    def connect_wireless(self):
+        try:
+            endpoint = normalize_wireless_endpoint(self.wireless_ip_var.get())
+        except ValueError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+            return
+        self.wireless_ip_var.set(endpoint)
+        self._set_status(f"{endpoint} 연결을 검증하는 중입니다.")
+
+        def work():
+            connected = self.adb_service.connect_wireless(
+                endpoint,
+                cancel_event=self.closing,
+            )
+            if not connected:
+                self._post_ui(
+                    lambda: messagebox.showerror(
+                        APP_NAME,
+                        "무선 ADB 연결 후 device 상태를 확인하지 못했습니다.",
+                    )
+                )
+                self._post_ui(lambda: self._set_status("무선 ADB 연결에 실패했습니다."))
+                return
+            self.created_wireless_endpoints.add(endpoint)
+            self.logger.info("무선 ADB 연결 검증 완료: %s", endpoint)
+            self._post_ui(self.refresh_devices)
+            self._post_ui(lambda: self._set_status(f"무선 ADB 연결 완료: {endpoint}"))
+
+        self._start_worker("wireless-connect", work, "무선 ADB 연결 중 오류가 발생했습니다.")
+
+    def disconnect_wireless(self):
+        try:
+            endpoint = normalize_wireless_endpoint(self.wireless_ip_var.get())
+        except ValueError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+            return
+        self._set_status(f"{endpoint} 연결을 해제하는 중입니다.")
+
+        def work():
+            disconnected = self.adb_service.disconnect_wireless(
+                endpoint,
+                cancel_event=self.closing,
+            )
+            if disconnected:
+                self.created_wireless_endpoints.discard(endpoint)
+                message = f"무선 ADB 연결 해제 완료: {endpoint}"
+            else:
+                message = f"무선 ADB 연결 해제를 확인하지 못했습니다: {endpoint}"
+            self.logger.info(message)
+            self._post_ui(lambda: self._set_status(message))
+            self._post_ui(self.refresh_devices)
+
+        self._start_worker("wireless-disconnect", work, "무선 ADB 연결 해제 중 오류가 발생했습니다.")
+
+    def configure_wireless_from_usb(self):
+        device = self._selected_device()
+        if not device:
+            messagebox.showerror(APP_NAME, "USB 기기를 선택해 주세요.")
+            return
+        state_message = device_state_error(device.state)
+        if state_message:
+            messagebox.showerror(APP_NAME, state_message)
+            return
+        if device.is_wireless:
+            messagebox.showerror(APP_NAME, "USB로 연결된 기기를 선택해 주세요.")
+            return
+        self._set_status("USB 기기를 무선 ADB로 설정하는 중입니다.")
+
+        def work():
+            if not self.adb_service.enable_tcpip(device.serial, cancel_event=self.closing):
+                raise RuntimeError("ADB TCP/IP 5555 모드를 활성화하지 못했습니다.")
+            address, candidates = self.adb_service.find_wifi_ip(
+                device.serial,
+                cancel_event=self.closing,
+            )
+            if not address:
+                raise RuntimeError("스마트폰의 Wi-Fi IP 주소를 찾지 못했습니다.")
+            endpoint = f"{address}:5555"
+            if not self.adb_service.connect_wireless(
+                endpoint,
+                cancel_event=self.closing,
+            ):
+                raise RuntimeError("무선 연결 후 ADB device 상태를 확인하지 못했습니다.")
+            self.created_wireless_endpoints.add(endpoint)
+            self.logger.info("USB→Wi-Fi ADB 설정 완료: %s, 후보=%s", endpoint, candidates)
+
+            def apply():
+                self.wireless_ip_var.set(endpoint)
+                self._set_status(f"USB→Wi-Fi ADB 설정 완료: {endpoint}")
+                self.refresh_devices()
+
+            self._post_ui(apply)
+
+        self._start_worker(
+            "wireless-auto-setup",
+            work,
+            "USB→Wi-Fi ADB 자동 설정에 실패했습니다. launcher.log를 확인해 주세요.",
+        )
+
+    def use_device_resolution(self):
+        device = self._selected_device()
+        if not device:
+            messagebox.showerror(APP_NAME, "기기를 선택해 주세요.")
+            return
+        state_message = device_state_error(device.state)
+        if state_message:
+            messagebox.showerror(APP_NAME, state_message)
+            return
+        profile = self._selected_profile()
+
+        def work():
+            size = self.adb_service.get_device_resolution(device.serial)
+            if not size:
+                raise RuntimeError("기기 원본 해상도를 읽지 못했습니다.")
+            width, height = orient_resolution(*size, profile.orientation)
+
+            def apply():
+                self.custom_enabled_var.set(True)
+                self.custom_width_var.set(str(width))
+                self.custom_height_var.set(str(height))
+                self._update_custom_state()
+                self._set_status(f"기기 원본 해상도 적용: {width}x{height}")
+
+            self._post_ui(apply)
+
+        self._start_worker("device-resolution", work, "기기 원본 해상도를 가져오지 못했습니다.")
+
+    def _validated_launch_selection(self):
+        profile = self._selected_profile()
+        device = self._selected_device()
+        if not device:
+            raise ValueError("연결할 Android 기기를 선택해 주세요.")
+        state_message = device_state_error(device.state)
+        if state_message:
+            raise ValueError(state_message)
+        if self.custom_enabled_var.get():
+            resolution = f"{self.custom_width_var.get()}x{self.custom_height_var.get()}"
+        else:
+            resolution = self.resolution_var.get()
+        warning = validate_resolution(resolution, profile.orientation)
+        if warning and not messagebox.askyesno(APP_NAME, f"{warning}\n그래도 실행할까요?"):
+            return None
+        mode = MODE_KEYS.get(self.mode_var.get())
+        if mode is None:
+            raise ValueError("실행 모드를 선택해 주세요.")
+        return profile, device, resolution, mode
 
     def launch_game(self):
-        selected = self.dev_var.get()
-        if not selected:
-            messagebox.showerror("오류", "연결된 기기가 없습니다. 새로고침을 하거나 무선 연결을 완료해 주세요.")
+        if self.binary_paths.missing:
+            messagebox.showerror(APP_NAME, "ADB와 scrcpy 실행 파일을 확인해 주세요.")
             return
-        
-        # Get resolution string
-        if self.custom_res_var.get():
-            w = self.txt_res_w.get().strip()
-            h = self.txt_res_h.get().strip()
-            
-            # Validation: check if positive integers
-            if not w.isdigit() or not h.isdigit() or int(w) <= 0 or int(h) <= 0:
-                messagebox.showwarning("해상도 형식 오류", "사용자 지정 해상도 값이 올바르지 않습니다. 가로, 세로에 올바른 정수 값을 입력해 주세요.\n기본값인 1280x720으로 자동 설정됩니다.")
-                w, h = "1280", "720"
-                
-                # Update UI
-                self.txt_res_w.config(state=tk.NORMAL)
-                self.txt_res_w.delete(0, tk.END)
-                self.txt_res_w.insert(0, "1280")
-                self.txt_res_h.config(state=tk.NORMAL)
-                self.txt_res_h.delete(0, tk.END)
-                self.txt_res_h.insert(0, "720")
-            
-            res = f"{w}x{h}"
-        else:
-            res = self.res_var.get().strip().lower()
-            if not re.match(r"^\d+x\d+$", res):
-                res = "1280x720"
-                self.res_var.set("1280x720")
-            
-        # Save current configurations
-        self.save_config()
-        
-        device_id = selected.split()[0]
-        window_title = "Pokémon Champions"
-        
-        self.set_status("포켓몬 챔피언스 실행 및 미러링 시작...", "blue")
-        
-        # Hide the main Tkinter window immediately so it feels like it closed
-        self.root.withdraw()
-        
-        def run_launch():
-            # Set up local debug logging for launcher execution
-            log_path = os.path.join(BASE_PATH, "ip_debug.log")
-            if os.path.exists(log_path):
-                try: os.remove(log_path)
-                except: pass
-                
-            def log_w(msg):
-                try:
-                    with open(log_path, "a", encoding="utf-8") as lf:
-                        lf.write(f"[{time.strftime('%H:%M:%S')}] [Launcher] {msg}\n")
-                except: pass
-
-            log_w("run_launch thread triggered.")
-            
-            # Wake up the phone display and dismiss the keyguard lock screen
-            run_cmd([ADB_PATH, "-s", device_id, "shell", "input", "keyevent", "KEYCODE_WAKEUP"])
-            run_cmd([ADB_PATH, "-s", device_id, "shell", "wm", "dismiss-keyguard"])
-            
-            # 1. Force-stop the app first to clean the slate
-            run_cmd([ADB_PATH, "-s", device_id, "shell", "am", "force-stop", PKG_NAME])
-            
-            # 2. Run scrcpy ONLY to create the virtual display (without --start-app)
-            scrcpy_args = [
-                SCRCPY_PATH,
-                "-s", device_id,
-                f"--new-display={res}/320",
-                "--no-vd-system-decorations",
-                "--stay-awake",
-                f"--window-title={window_title}"
-            ]
-            
-            if self.turn_screen_off_var.get():
-                scrcpy_args.append("--turn-screen-off")
-                
-            if self.borderless_var.get():
-                scrcpy_args.extend(["--window-borderless", "--fullscreen"])
-                
-            fps_val = self.fps_var.get()
-            if fps_val and "제한 없음" not in fps_val:
-                scrcpy_args.append(f"--max-fps={fps_val}")
-            
-            proc = None
-            try:
-                # Launch scrcpy and pipe stdout/stderr
-                proc = subprocess.Popen(
-                    scrcpy_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="ignore",
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-            except Exception as e:
-                # If failed to launch, we need to show the window again to display error
-                def err(msg):
-                    self.root.deiconify()
-                    messagebox.showerror("scrcpy 실행 오류", f"scrcpy 실행에 실패했습니다:\n{msg}")
-                self.root.after(0, lambda: err(str(e)))
-                return
-            
-            # 3. Read scrcpy pipe in real-time to detect the virtual display ID
-            display_id = None
-            start_time = time.time()
-            log_w("Reading scrcpy pipe to detect display ID...")
-            
-            while True:
-                if time.time() - start_time > 6.0:
-                    log_w("Timeout waiting for display ID from pipe.")
-                    break
-                
-                line = proc.stdout.readline()
-                if not line:
-                    if proc.poll() is not None:
-                        log_w(f"scrcpy process terminated early with code {proc.poll()}")
-                        break
-                    time.sleep(0.05)
-                    continue
-                
-                # Check for display ID pattern from scrcpy logs
-                # e.g., "[server] INFO: New display: 1280x720/320 (id=49)"
-                match = re.search(r"New display:.*\(id=(\d+)\)", line)
-                if match:
-                    display_id = match.group(1)
-                    log_w(f"Successfully detected display ID from scrcpy log: {display_id}")
-                    break
-            
-            # 4. Fallback if display_id not found via pipe
-            if not display_id:
-                log_w("Falling back to dumpsys display parsing...")
-                for attempt in range(6):  # try for another 3 seconds
-                    time.sleep(0.5)
-                    stdout, _, _ = run_cmd([ADB_PATH, "-s", device_id, "shell", "dumpsys display"])
-                    
-                    # Match DisplayInfo{"scrcpy", displayId 49}
-                    match = re.search(r'DisplayInfo\{"scrcpy",\s+displayId\s+(\d+)', stdout)
-                    if match:
-                        display_id = match.group(1)
-                        log_w(f"Found display ID via dumpsys DisplayInfo: {display_id}")
-                        break
-                    
-                    # Match general VIRTUAL viewport
-                    ids = re.findall(r"DisplayViewport\{type=VIRTUAL,.*displayId=(\d+)", stdout)
-                    if ids:
-                        valid_ids = [int(i) for i in ids if int(i) > 0]
-                        if valid_ids:
-                            display_id = str(max(valid_ids))
-                            log_w(f"Found display ID via dumpsys Viewport: {display_id}")
-                            break
-            
-            # 5. Final hard fallback to 0 (main screen) if everything else fails
-            if not display_id:
-                display_id = "0"
-                log_w(f"All detection methods failed. Falling back to display ID: {display_id}")
-            
-            # 6. Launch the game targeted at the detected display ID using explicit activity launch
-            log_w(f"Launching game activity on display {display_id}...")
-            launch_out, launch_err, launch_code = run_cmd([
-                ADB_PATH, "-s", device_id, "shell", "am", "start-activity",
-                "--display", display_id,
-                "-n", f"{PKG_NAME}/com.unity3d.player.UnityPlayerActivity"
-            ])
-            log_w(f"Launch app result code: {launch_code}")
-            log_w(f"Launch app stdout: {launch_out.strip()}")
-            log_w(f"Launch app stderr: {launch_err.strip()}")
-            
-            # 7. Spawn a daemon thread to keep draining scrcpy stdout/stderr buffer to prevent blocking
-            def drain_pipe(p):
-                try:
-                    while True:
-                        l = p.stdout.readline()
-                        if not l and p.poll() is not None:
-                            break
-                except:
-                    pass
-            threading.Thread(target=drain_pipe, args=(proc,), daemon=True).start()
-            
-            # 8. Wait for scrcpy window and set its icon dynamically (runs in parallel)
-            def set_icon_work():
-                icon_path = os.path.join(BASE_PATH, "bin", "scrcpy", "pokemon_icon.ico")
-                if not os.path.exists(icon_path):
-                    icon_path = os.path.join(BASE_PATH, "pokemon_icon.ico")
-                    
-                if os.path.exists(icon_path):
-                    try:
-                        import ctypes
-                        user32 = ctypes.windll.user32
-                        WM_SETICON = 0x80
-                        ICON_SMALL = 0
-                        ICON_BIG = 1
-                        IMAGE_ICON = 1
-                        LR_LOADFROMFILE = 0x0010
-                        
-                        # Wait up to 12 seconds for the window to appear
-                        hwnd = None
-                        for _ in range(60):
-                            time.sleep(0.2)
-                            hwnd = user32.FindWindowW(None, window_title)
-                            if hwnd:
-                                break
-                                
-                        if hwnd:
-                            h_icon = user32.LoadImageW(
-                                None,
-                                icon_path,
-                                IMAGE_ICON,
-                                0, 0,
-                                LR_LOADFROMFILE
-                            )
-                            if h_icon:
-                                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, h_icon)
-                                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, h_icon)
-                    except Exception:
-                        pass
-                        
-            threading.Thread(target=set_icon_work, daemon=True).start()
-            
-            # 9. Wait for scrcpy to terminate before exiting launcher to prevent lingering processes
-            proc.wait()
-            log_w("scrcpy process terminated. Exiting launcher.")
-            
-            # Exit process cleanly
-            import os as local_os
-            local_os._exit(0)
-            
-        threading.Thread(target=run_launch, daemon=True).start()
-
-# ----------------------------------------------------
-# Main Execution
-# ----------------------------------------------------
-if __name__ == "__main__":
-    root = tk.Tk()
-    
-    # Set Window Icon
-    icon_path = os.path.join(BASE_PATH, "bin", "scrcpy", "pokemon_icon.ico")
-    if not os.path.exists(icon_path):
-        icon_path = os.path.join(BASE_PATH, "pokemon_icon.ico")
-    if os.path.exists(icon_path):
         try:
-            root.iconbitmap(icon_path)
+            selection = self._validated_launch_selection()
+        except (KeyError, ValueError) as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+            return
+        if selection is None:
+            return
+        profile, selected_device, resolution, mode = selection
+        fps = self.fps_var.get()
+        borderless = self.borderless_var.get()
+        turn_screen_off = self.turn_screen_off_var.get()
+        self.launch_button.configure(state="disabled")
+        self._set_status("게임 실행 전 검증을 시작합니다.")
+
+        def work():
+            session = None
+            started = False
+            try:
+                devices = {device.serial: device for device in self.adb_service.list_devices()}
+                device = devices.get(selected_device.serial)
+                if not device:
+                    raise RuntimeError("선택한 기기가 더 이상 연결되어 있지 않습니다.")
+                state_message = device_state_error(device.state)
+                if state_message:
+                    raise RuntimeError(state_message)
+                if not self.adb_service.is_package_installed(device.serial, profile.package):
+                    raise RuntimeError(
+                        f"{profile.display_name}이 선택한 스마트폰에 설치되어 있지 않습니다."
+                    )
+                activity = self.adb_service.resolve_launch_activity(
+                    device.serial,
+                    profile.package,
+                    cancel_event=self.closing,
+                )
+                if not activity:
+                    raise RuntimeError(
+                        f"{profile.display_name}의 실행 Activity를 찾지 못했습니다."
+                    )
+                self.logger.info("Activity 탐색 결과: %s", activity)
+                self.adb_service.wake_and_unlock(device.serial)
+                self.adb_service.force_stop(device.serial, profile.package)
+                before_ids = (
+                    self.adb_service.get_virtual_display_ids(device.serial)
+                    if mode == VIRTUAL_DISPLAY_MODE
+                    else set()
+                )
+                options = ScrcpyOptions(
+                    mode=mode,
+                    resolution=resolution,
+                    fps=fps,
+                    borderless=borderless,
+                    turn_screen_off=turn_screen_off,
+                )
+                args = build_scrcpy_args(
+                    self.binary_paths.scrcpy_path,
+                    device.serial,
+                    profile,
+                    options,
+                )
+                self.logger.info(
+                    "scrcpy 시작: device=%s mode=%s resolution=%s",
+                    device.serial,
+                    mode,
+                    resolution,
+                )
+                session = self.scrcpy_service.start(args)
+                with self.session_lock:
+                    self.scrcpy_session = session
+                if mode == VIRTUAL_DISPLAY_MODE:
+                    display_id = session.wait_for_virtual_display(
+                        self.adb_service,
+                        device.serial,
+                        before_ids,
+                        cancel_event=self.closing,
+                    )
+                else:
+                    display_id = 0
+                    self.logger.info("사용자가 기본 화면 미러링 모드를 선택했습니다.")
+                self.logger.info("게임 실행 display ID: %s", display_id)
+                if not self.adb_service.launch_activity(device.serial, activity, display_id):
+                    raise RuntimeError("Android 게임 Activity 실행 명령이 실패했습니다.")
+                if not self.adb_service.wait_for_app_running(
+                    device.serial,
+                    profile.package,
+                    cancel_event=self.closing,
+                ):
+                    raise RuntimeError("게임 프로세스의 정상 실행을 확인하지 못했습니다.")
+                started = True
+                self.logger.info("게임 실행 확인 완료: %s", profile.display_name)
+                self._post_ui(lambda: self._on_game_started(profile))
+                exit_code = session.wait()
+                self.logger.info("scrcpy 종료: exit_code=%s", exit_code)
+            except VirtualDisplayError as exc:
+                self.logger.error("Virtual Display 생성 실패: %s", exc)
+                message = str(exc)
+                self._post_ui(lambda: messagebox.showerror(APP_NAME, message))
+            except Exception:
+                self.logger.exception("게임 실행에 실패했습니다.")
+                message = str(sys.exc_info()[1])
+                self._post_ui(lambda: messagebox.showerror(APP_NAME, message))
+            finally:
+                if session and not started:
+                    session.terminate()
+                    self.logger.info("실패한 scrcpy process 정리 완료")
+                with self.session_lock:
+                    if self.scrcpy_session is session:
+                        self.scrcpy_session = None
+                if started:
+                    self._post_ui(self.request_shutdown)
+                else:
+                    self._post_ui(self._restore_after_launch_failure)
+
+        self.workers.start("game-launch", work)
+
+    def _on_game_started(self, profile):
+        self._set_status(f"{profile.display_name} 실행 중입니다.")
+        self._apply_scrcpy_window_icon(profile.display_name)
+        self.root.withdraw()
+
+    def _restore_after_launch_failure(self):
+        self.launch_button.configure(state="normal")
+        self._set_status("게임 실행에 실패했습니다. launcher.log를 확인해 주세요.")
+
+    def _apply_scrcpy_window_icon(self, window_title, retries=10):
+        if os.name != "nt" or not self.icon_path.is_file() or self.closing.is_set():
+            return
+        user32 = ctypes.windll.user32
+        window = user32.FindWindowW(None, window_title)
+        if not window:
+            if retries > 0:
+                self.root.after(
+                    250,
+                    lambda: self._apply_scrcpy_window_icon(window_title, retries - 1),
+                )
+            return
+        image_icon = 1
+        load_from_file = 0x0010
+        icon = user32.LoadImageW(None, str(self.icon_path), image_icon, 0, 0, load_from_file)
+        if icon:
+            user32.SendMessageW(window, 0x0080, 0, icon)
+            user32.SendMessageW(window, 0x0080, 1, icon)
+            self._scrcpy_icon_handle = icon
+            self.logger.info("scrcpy window icon 적용 완료")
+
+    def _collect_config(self):
+        self._store_current_game_settings()
+        profile = self._selected_profile()
+        self.config.update(
+            {
+                "last_game": profile.key,
+                "launch_mode": MODE_KEYS.get(self.mode_var.get(), VIRTUAL_DISPLAY_MODE),
+                "fps": self.fps_var.get(),
+                "borderless": self.borderless_var.get(),
+                "turn_screen_off": self.turn_screen_off_var.get(),
+                "kill_adb_server_on_exit": self.kill_adb_server_var.get(),
+                "wireless_ip": self.wireless_ip_var.get(),
+            }
+        )
+        return self.config
+
+    def request_shutdown(self):
+        if self.closing.is_set():
+            return
+        self.closing.set()
+        self.logger.info("정상 종료 sequence 시작")
+        config = self._collect_config()
+        force_adb_shutdown = self.kill_adb_server_var.get()
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            self.logger.info("이미 닫힌 Tkinter 창을 숨길 수 없습니다.")
+        self.workers.start(
+            "shutdown-cleanup",
+            self._cleanup,
+            config,
+            force_adb_shutdown,
+        )
+
+    def _cleanup(self, config, force_adb_shutdown):
+        try:
+            self._cleanup_steps(config, force_adb_shutdown)
         except Exception:
-            pass
-            
-    app = AppLauncher(root)
+            self.logger.exception("정상 종료 sequence 중 예외가 발생했습니다.")
+        finally:
+            self.logger.info("child process 종료 및 정상 종료 sequence 완료")
+            for handler in logging.getLogger().handlers:
+                try:
+                    handler.flush()
+                except (OSError, ValueError):
+                    self.logger.exception("로그 handler flush에 실패했습니다.")
+            self._post_ui(self._finalize_shutdown, allow_during_shutdown=True)
+
+    def _cleanup_steps(self, config, force_adb_shutdown):
+        with self.session_lock:
+            session = self.scrcpy_session
+        if session:
+            try:
+                session.terminate(timeout=3)
+                self.logger.info("scrcpy process 및 pipe 종료 완료")
+            except Exception:
+                self.logger.exception("scrcpy process 종료 중 오류가 발생했습니다.")
+        else:
+            self.logger.info("종료할 scrcpy process가 없습니다.")
+
+        alive_workers = self.workers.join_all(timeout=22)
+        if alive_workers:
+            self.logger.warning("종료되지 않은 worker thread: %s", ", ".join(alive_workers))
+        else:
+            self.logger.info("launcher worker thread 종료 완료")
+
+        for endpoint in sorted(self.created_wireless_endpoints):
+            try:
+                disconnected = self.adb_service.disconnect_wireless(endpoint)
+                self.logger.info("종료 시 ADB disconnect %s: %s", endpoint, disconnected)
+            except Exception:
+                self.logger.exception("종료 시 ADB connection 해제 실패: %s", endpoint)
+
+        saved = save_config(self.config_path, config, logger=self.logger)
+        self.logger.info("config 저장 결과: %s", saved)
+
+        if self.adb_manager:
+            try:
+                stopped = self.adb_manager.shutdown(force_preexisting=force_adb_shutdown)
+                self.logger.info("ADB server 종료 결과: %s", stopped)
+            except Exception:
+                self.logger.exception("ADB server 종료 중 오류가 발생했습니다.")
+
+    def _finalize_shutdown(self):
+        try:
+            self.root.destroy()
+        finally:
+            logging.shutdown()
+
+
+def main():
+    application_dir = get_application_dir()
+    logger = configure_logger(application_dir)
+    set_windows_app_id(logger)
+    root = tk.Tk()
+    icon_path = application_dir / "pokemon_icon.ico"
+    if not icon_path.is_file():
+        icon_path = application_dir / "bin" / "scrcpy" / "pokemon_icon.ico"
+    if icon_path.is_file():
+        try:
+            root.iconbitmap(str(icon_path))
+        except tk.TclError:
+            logger.exception("런처 window icon을 적용하지 못했습니다.")
+    AppLauncher(root, application_dir, logger)
     root.mainloop()
+    logger.info("Tkinter mainloop 종료")
+
+
+if __name__ == "__main__":
+    main()
