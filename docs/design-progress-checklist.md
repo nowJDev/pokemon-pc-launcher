@@ -12,7 +12,7 @@
 | R-001 | 두 게임 프로필과 게임 선택 GUI | 구현 완료 | `game_profiles.py`, `pokemon_launcher.py` | 프로필·GUI 계약 테스트 통과 | 실제 두 게임 실행은 기기 검증이 필요하다. |
 | R-002 | ADB 상태, Wi-Fi 검증, IP 탐색과 연결 해제 | 구현 완료 | `launcher_core.py` | 파서·서비스 단위 테스트 통과 | 제조사별 명령 출력은 실제 기기 검증이 필요하다. |
 | R-003 | 패키지 설치와 native 앱 실행 | 구현 완료 | `launcher_core.py`, `pokemon_launcher.py` | package·command builder 테스트 통과 | Activity 탐색 없이 `--start-app=+PACKAGE`를 사용한다. |
-| R-004 | Virtual Display와 미러링 모드 | 구현 완료 | `launcher_core.py`, `pokemon_launcher.py` | 네 게임·모드 조합 인자 테스트 통과 | display ID는 scrcpy가 관리한다. |
+| R-004 | Virtual Display와 미러링 모드 | 일부 완료 | `launcher_core.py`, `pokemon_launcher.py` | 네 게임·모드 조합 인자 테스트 통과, SM-S936N 영상 출력 확인 | Android 16 Champions Virtual Display에서 키보드·마우스 입력 실패를 확인했다. 화면 끄기 해제와 기본 미러링 비교가 필요하다. |
 | R-005 | 해상도·Flex·FPS·화면 옵션과 config 호환성 | 구현 완료 | 프로필·core·GUI | 해상도·0.1 config·Flex 테스트 통과 | Flex는 기본 OFF다. |
 | R-006 | 로그, timeout, 바이너리 경로와 정상 종료 | 구현 완료 | core·GUI | ADB 소유권·scrcpy·worker 테스트 통과 | 실제 게임 종료 뒤 폴더 rename·삭제 검증은 남았다. |
 | R-007 | README, 보안, 제3자 고지 | 일부 완료 | `README.md`, `THIRD_PARTY_NOTICES.md`, `licenses/` | scrcpy 4.1 공식 ZIP 16개 파일과 원문 고지 확인 | 원저작자 허가와 FFmpeg 대응 소스 Release 제공이 남았다. |

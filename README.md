@@ -74,6 +74,19 @@ scrcpy 4.1의 `--start-app=+PACKAGE`로 선택한 앱을 실행하고 일반 화
 
 두 모드는 `--keep-active`로 사용자 활동을 모사해 화면을 유지하고, 기존 충전 중 화면 유지 동작을 보존하기 위해 `--stay-awake`도 함께 사용합니다.
 
+### Virtual Display 입력 문제.
+
+Samsung SM-S936N의 Android 16 환경에서 Pokémon Champions를 Virtual Display로 실행했을 때 display 생성, 앱 실행과 영상 출력은 정상이지만 키보드·마우스 입력이 전달되지 않는 사례를 확인했습니다. 당시 `스마트폰 실제 화면 끄기` 옵션이 켜져 있었으며, 이 옵션과의 인과관계는 아직 재검증 전입니다.
+
+같은 증상이 발생하면 다음 순서로 확인하세요.
+
+1. `스마트폰 실제 화면 끄기`를 해제하고 Virtual Display를 다시 실행합니다.
+2. 계속 입력되지 않으면 `기본 화면 미러링` 모드에서 마우스 클릭 입력을 확인합니다.
+3. 두 모드 모두 입력되지 않으면 기기의 개발자 옵션에서 입력 주입에 필요한 추가 보안 설정이 있는지 확인합니다.
+4. 재현 환경과 `launcher.log`를 함께 남깁니다.
+
+scrcpy upstream에도 실제 화면이 어두워지거나 꺼진 뒤 Virtual Display의 마우스 입력이 멈추는 [기기별 사례](https://github.com/Genymobile/scrcpy/issues/5529), Samsung 기기에서 입력이 실제 화면으로 전달되는 [Virtual Display 사례](https://github.com/Genymobile/scrcpy/issues/5547), Android 16 Samsung 기기의 [입력 불안정 사례](https://github.com/Genymobile/scrcpy/issues/6909)가 보고되어 있습니다. `--keyboard=uhid`와 `--mouse=uhid`는 Virtual Display 대신 실제 화면을 제어할 수 있다는 [upstream 보고](https://github.com/Genymobile/scrcpy/issues/5557)가 있어 자동 우회 옵션으로 사용하지 않습니다.
+
 ## 최대 전송 FPS.
 
 `최대 전송 FPS`는 scrcpy의 화면 캡처·전송 상한입니다. 게임 자체의 FPS 제한을 해제하거나 30 FPS 게임을 144 FPS로 변환하지 않습니다.
@@ -113,7 +126,7 @@ python pokemon_launcher.py
 
 Android 기기가 필요 없는 테스트는 프로필, ADB 출력과 RFC1918 IP 판별, 해상도, 0.1 설정 마이그레이션, scrcpy 4.1 인자·버전과 process 수명주기를 검증합니다.
 
-실제 기기에서는 Champions와 TCG Pocket 각각 USB·Wi-Fi·Virtual Display·기본 미러링 조합을 확인해야 합니다. 종료 후 작업 관리자에서 런처, scrcpy, 불필요한 bundled ADB process가 남지 않는지와 프로그램 폴더의 이름 변경 및 삭제 가능 여부도 확인해야 합니다.
+실제 기기에서는 Champions와 TCG Pocket 각각 USB·Wi-Fi·Virtual Display·기본 미러링 조합을 확인해야 합니다. SM-S936N의 Android 16에서 Champions Virtual Display 영상 출력은 확인했지만 키보드·마우스 입력은 실패했으므로 화면 끄기 옵션별 재검증이 필요합니다. 종료 후 작업 관리자에서 런처, scrcpy, 불필요한 bundled ADB process가 남지 않는지와 프로그램 폴더의 이름 변경 및 삭제 가능 여부도 확인해야 합니다.
 
 ## 새 게임 프로필 추가
 
