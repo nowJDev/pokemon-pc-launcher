@@ -61,5 +61,5 @@ pyinstaller --noconfirm --clean --onefile --windowed --name "Pokémon PC Launche
 - [x] Python 모듈 compileall과 `git diff --check`를 통과시킨다.
 - [x] EXE에 포함된 32픽셀 아이콘을 렌더링해 형태와 투명도를 확인한다.
 - [x] 전체 diff에서 기존 코드와 사용자 파일이 의도치 않게 변경되지 않았는지 검토한다.
-- [ ] 한글 커밋 후 `main`에 fast-forward 병합하고 원격에 push한다.
+- [x] 한글 커밋 후 `main`에 fast-forward 병합하고 원격에 push한다.
 - [x] 원본 저장소의 LICENSE 부재가 해결되기 전에는 공개 Release 대신 배포 게이트 상태를 보고한다.
