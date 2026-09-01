@@ -1,6 +1,7 @@
 # GUI 진입점의 버전과 금지된 하드코딩 제거를 검증한다.
 
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 import pokemon_launcher
@@ -15,7 +16,7 @@ class LauncherGuiContractTests(unittest.TestCase):
         self.assertTrue(hasattr(pokemon_launcher, "APP_NAME"))
         self.assertTrue(hasattr(pokemon_launcher, "APP_VERSION"))
         self.assertEqual(pokemon_launcher.APP_NAME, "Pokémon PC Launcher")
-        self.assertEqual(pokemon_launcher.APP_VERSION, "0.1")
+        self.assertEqual(pokemon_launcher.APP_VERSION, "0.2")
 
     def test_game_package_and_activity_are_not_hardcoded_in_gui(self):
         self.assertNotIn("PKG_NAME", self.source)
@@ -29,6 +30,15 @@ class LauncherGuiContractTests(unittest.TestCase):
     def test_virtual_display_failure_does_not_fall_back_to_zero(self):
         self.assertNotIn('display_id = "0"', self.source)
         self.assertNotIn("Falling back to display ID", self.source)
+
+    def test_scrcpy_native_launch_replaces_android_internal_control(self):
+        self.assertNotIn("VirtualDisplayError", self.source)
+        self.assertNotIn("resolve_launch_activity", self.source)
+        self.assertNotIn("launch_activity", self.source)
+        self.assertNotIn("wait_for_app_running", self.source)
+        self.assertNotIn("force_stop", self.source)
+        self.assertNotIn("wake_and_unlock", self.source)
+        self.assertIn("if exit_code != 0", self.source)
 
     def test_existing_144_fps_option_is_preserved(self):
         self.assertIn("144", pokemon_launcher.FPS_VALUES)
@@ -73,6 +83,30 @@ class LauncherGuiContractTests(unittest.TestCase):
             launcher.config["game_resolutions"]["pokemon_tcgpocket"],
             "720x1280",
         )
+
+    def test_config_collection_persists_flex_display(self):
+        class Variable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+        launcher = pokemon_launcher.AppLauncher.__new__(pokemon_launcher.AppLauncher)
+        launcher.config = {}
+        launcher._store_current_game_settings = lambda: None
+        launcher._selected_profile = lambda: SimpleNamespace(key="pokemon_champions")
+        launcher.mode_var = Variable("Virtual Display")
+        launcher.fps_var = Variable("60")
+        launcher.borderless_var = Variable(False)
+        launcher.turn_screen_off_var = Variable(False)
+        launcher.flex_display_var = Variable(True)
+        launcher.kill_adb_server_var = Variable(False)
+        launcher.wireless_ip_var = Variable("192.168.0.8:5555")
+
+        config = launcher._collect_config()
+
+        self.assertTrue(config["flex_display"])
 
 
 if __name__ == "__main__":

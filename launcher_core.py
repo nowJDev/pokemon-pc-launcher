@@ -6,7 +6,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import queue
 import re
 import socket
 import subprocess
@@ -19,6 +18,7 @@ from game_profiles import load_game_profiles
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 DEFAULT_FPS = "제한 없음 (기본값)"
+SUPPORTED_SCRCPY_VERSION = "4.1"
 VIRTUAL_DISPLAY_MODE = "virtual_display"
 MIRROR_MODE = "mirror"
 RFC1918_NETWORKS = tuple(
@@ -53,6 +53,7 @@ class ScrcpyOptions:
     fps: str = DEFAULT_FPS
     borderless: bool = False
     turn_screen_off: bool = False
+    flex_display: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,10 +61,6 @@ class BinaryPaths:
     adb_path: str
     scrcpy_path: str
     missing: tuple[str, ...]
-
-
-class VirtualDisplayError(RuntimeError):
-    pass
 
 
 class WorkerRegistry:
@@ -168,25 +165,6 @@ def parse_package_list(output):
     return packages
 
 
-def parse_resolve_activity(output, package):
-    component_pattern = re.compile(r"^([A-Za-z0-9_.]+)/([A-Za-z0-9_.$]+)$")
-    for line in reversed(output.splitlines()):
-        candidate = line.strip()
-        match = component_pattern.fullmatch(candidate)
-        if match and match.group(1) == package:
-            return candidate
-    return None
-
-
-def parse_dumpsys_launch_activity(output, package):
-    component_pattern = re.compile(rf"{re.escape(package)}/[A-Za-z0-9_.$]+")
-    for match in component_pattern.finditer(output):
-        context = output[max(0, match.start() - 300) : match.end() + 1000]
-        if "android.intent.action.MAIN" in context and "android.intent.category.LAUNCHER" in context:
-            return match.group(0)
-    return None
-
-
 def is_wifi_candidate_ip(value):
     try:
         address = ipaddress.ip_address(value.split("/", 1)[0].strip())
@@ -275,35 +253,6 @@ def select_wifi_ip(route_output, addr_output, wifi_output):
     return (candidates[0] if candidates else None), candidates
 
 
-def parse_scrcpy_display_id(line):
-    match = re.search(r"New display:.*\(id=(\d+)\)", line)
-    if not match:
-        return None
-    display_id = int(match.group(1))
-    return display_id if display_id > 0 else None
-
-
-def parse_virtual_display_ids(output):
-    display_ids = set()
-    for line in output.splitlines():
-        if "scrcpy" not in line.lower():
-            continue
-        for pattern in (r"displayId\s*[=:]?\s*(\d+)", r"mDisplayId\s*[=:]\s*(\d+)"):
-            for value in re.findall(pattern, line):
-                display_id = int(value)
-                if display_id > 0:
-                    display_ids.add(display_id)
-    return display_ids
-
-
-def choose_new_display_id(before_ids, after_ids):
-    candidates = {int(value) for value in after_ids} - {int(value) for value in before_ids}
-    candidates.discard(0)
-    if len(candidates) == 1:
-        return candidates.pop()
-    return None
-
-
 def validate_resolution(value, orientation):
     match = re.fullmatch(r"(\d+)x(\d+)", value.strip().lower())
     if not match:
@@ -339,6 +288,7 @@ def _default_config():
         "fps": DEFAULT_FPS,
         "borderless": False,
         "turn_screen_off": False,
+        "flex_display": False,
         "kill_adb_server_on_exit": False,
         "wireless_ip": "192.168.0.16",
     }
@@ -408,7 +358,12 @@ def normalize_config(config):
                 "height": height,
             }
 
-    for key in ("borderless", "turn_screen_off", "kill_adb_server_on_exit"):
+    for key in (
+        "borderless",
+        "turn_screen_off",
+        "flex_display",
+        "kill_adb_server_on_exit",
+    ):
         if isinstance(config.get(key), bool):
             normalized[key] = config[key]
     for key in ("fps", "wireless_ip"):
@@ -462,7 +417,12 @@ def resolve_binary_paths(base_path):
     base = Path(base_path)
     adb_path = _first_existing(
         base,
-        (("bin", "adb", "adb.exe"), ("bin", "adb.exe"), ("adb.exe",)),
+        (
+            ("bin", "scrcpy", "adb.exe"),
+            ("bin", "adb", "adb.exe"),
+            ("bin", "adb.exe"),
+            ("adb.exe",),
+        ),
     )
     scrcpy_path = _first_existing(
         base,
@@ -501,6 +461,7 @@ def build_scrcpy_args(executable, serial, profile, options):
         executable,
         "-s",
         serial,
+        "--keep-active",
         "--stay-awake",
         f"--window-title={profile.display_name}",
     ]
@@ -511,11 +472,15 @@ def build_scrcpy_args(executable, serial, profile, options):
                 "--no-vd-system-decorations",
             ]
         )
+        if options.flex_display:
+            args.append("--flex-display")
     elif options.mode == MIRROR_MODE:
         width, height = (int(value) for value in options.resolution.lower().split("x", 1))
         args.append(f"--max-size={max(width, height)}")
     else:
         raise ValueError(f"지원하지 않는 실행 모드입니다: {options.mode}")
+
+    args.append(f"--start-app=+{profile.package}")
 
     if options.turn_screen_off:
         args.append("--turn-screen-off")
@@ -526,6 +491,19 @@ def build_scrcpy_args(executable, serial, profile, options):
             raise ValueError("FPS는 양수여야 합니다.")
         args.append(f"--max-fps={options.fps}")
     return args
+
+
+def parse_scrcpy_version(output):
+    match = re.search(r"^scrcpy\s+([0-9]+(?:\.[0-9]+)*)\b", output, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def get_scrcpy_version(executable, runner=None):
+    command_runner = runner or CommandRunner()
+    result = command_runner.run([executable, "--version"], timeout=5)
+    if result.returncode != 0 or result.timed_out:
+        return None
+    return parse_scrcpy_version(f"{result.stdout}\n{result.stderr}")
 
 
 def _adb_server_is_reachable(host="127.0.0.1", port=5037, timeout=0.2):
@@ -626,87 +604,12 @@ class AdbService:
                 self.sleep(retry_delay)
         return False
 
-    def resolve_launch_activity(self, serial, package, cancel_event=None):
-        commands = [
-            [
-                self.adb_path,
-                "-s",
-                serial,
-                "shell",
-                "cmd",
-                "package",
-                "resolve-activity",
-                "--brief",
-                "--user",
-                "0",
-                package,
-            ],
-            [
-                self.adb_path,
-                "-s",
-                serial,
-                "shell",
-                "cmd",
-                "package",
-                "query-activities",
-                "--brief",
-                "--user",
-                "0",
-                "-a",
-                "android.intent.action.MAIN",
-                "-c",
-                "android.intent.category.LAUNCHER",
-                package,
-            ],
-        ]
-        for command in commands:
-            if _cancel_requested(cancel_event):
-                return None
-            result = self.runner.run(command, timeout=10)
-            component = parse_resolve_activity(result.stdout, package)
-            if component:
-                return component
-
-        if _cancel_requested(cancel_event):
-            return None
-        result = self.runner.run(
-            [self.adb_path, "-s", serial, "shell", "dumpsys", "package", package],
-            timeout=15,
-        )
-        return parse_dumpsys_launch_activity(result.stdout, package)
-
     def is_package_installed(self, serial, package):
         result = self.runner.run(
             [self.adb_path, "-s", serial, "shell", "pm", "list", "packages", package],
             timeout=10,
         )
         return result.returncode == 0 and package in parse_package_list(result.stdout)
-
-    def wake_and_unlock(self, serial):
-        wake = self.runner.run(
-            [
-                self.adb_path,
-                "-s",
-                serial,
-                "shell",
-                "input",
-                "keyevent",
-                "KEYCODE_WAKEUP",
-            ],
-            timeout=5,
-        )
-        unlock = self.runner.run(
-            [self.adb_path, "-s", serial, "shell", "wm", "dismiss-keyguard"],
-            timeout=5,
-        )
-        return wake.returncode == 0 and unlock.returncode == 0
-
-    def force_stop(self, serial, package):
-        result = self.runner.run(
-            [self.adb_path, "-s", serial, "shell", "am", "force-stop", package],
-            timeout=10,
-        )
-        return result.returncode == 0 and not result.timed_out
 
     def get_device_resolution(self, serial):
         result = self.runner.run(
@@ -775,74 +678,14 @@ class AdbService:
         devices = self.list_devices()
         return not any(device.serial == endpoint and device.state == "device" for device in devices)
 
-    def launch_activity(self, serial, component, display_id):
-        result = self.runner.run(
-            [
-                self.adb_path,
-                "-s",
-                serial,
-                "shell",
-                "am",
-                "start-activity",
-                "-W",
-                "--display",
-                str(display_id),
-                "-n",
-                component,
-            ],
-            timeout=20,
-        )
-        combined = f"{result.stdout}\n{result.stderr}".lower()
-        return result.returncode == 0 and "error:" not in combined and "exception" not in combined
-
-    def is_app_running(self, serial, package):
-        pid = self.runner.run(
-            [self.adb_path, "-s", serial, "shell", "pidof", package],
-            timeout=5,
-        )
-        if pid.returncode == 0 and pid.stdout.strip():
-            return True
-        activities = self.runner.run(
-            [self.adb_path, "-s", serial, "shell", "dumpsys", "activity", "activities"],
-            timeout=15,
-        )
-        return activities.returncode == 0 and package in activities.stdout
-
-    def wait_for_app_running(
-        self,
-        serial,
-        package,
-        retries=5,
-        delay=0.5,
-        cancel_event=None,
-    ):
-        for attempt in range(retries):
-            if _cancel_requested(cancel_event):
-                return False
-            if self.is_app_running(serial, package):
-                return True
-            if attempt + 1 < retries:
-                self.sleep(delay)
-        return False
-
-    def get_virtual_display_ids(self, serial):
-        result = self.runner.run(
-            [self.adb_path, "-s", serial, "shell", "dumpsys", "display"],
-            timeout=15,
-        )
-        if result.returncode != 0:
-            return set()
-        return parse_virtual_display_ids(result.stdout)
-
-
 class ScrcpySession:
-    def __init__(self, process, logger=None, output_queue=None, sleep=None):
+    def __init__(self, process, logger=None):
         self.process = process
         self.logger = logger or logging.getLogger(__name__)
-        self.output_queue = output_queue or queue.Queue()
-        self.sleep = sleep or time.sleep
+        self._output_lock = threading.Lock()
+        self._output_lines = []
         self._drain_thread = None
-        if output_queue is None and process.stdout is not None:
+        if process.stdout is not None:
             self._drain_thread = threading.Thread(target=self._drain_output, daemon=True)
             self._drain_thread.start()
 
@@ -852,55 +695,27 @@ class ScrcpySession:
                 clean_line = line.rstrip()
                 if clean_line:
                     self.logger.info("scrcpy: %s", clean_line)
-                    self.output_queue.put(clean_line)
+                    with self._output_lock:
+                        self._output_lines.append(clean_line)
                 if not line and self.process.poll() is not None:
                     break
         except (OSError, ValueError):
-            self.logger.exception("scrcpy 로그를 읽지 못했습니다.")
-        finally:
-            self.output_queue.put(None)
+            if self.process.poll() is None:
+                self.logger.exception("scrcpy 로그를 읽지 못했습니다.")
+            else:
+                self.logger.info("종료된 scrcpy 출력 pipe 읽기를 마쳤습니다.")
+    def wait_for_early_exit(self, timeout=1.5):
+        try:
+            exit_code = self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+        if self._drain_thread:
+            self._drain_thread.join(0.5)
+        return exit_code
 
-    def wait_for_virtual_display(
-        self,
-        adb_service,
-        serial,
-        before_ids,
-        log_timeout=6,
-        dump_retries=6,
-        dump_delay=0.5,
-        cancel_event=None,
-    ):
-        deadline = time.monotonic() + log_timeout
-        while time.monotonic() < deadline:
-            if _cancel_requested(cancel_event):
-                raise VirtualDisplayError("런처 종료 요청으로 Virtual Display 탐지를 중단했습니다.")
-            remaining = max(0.01, min(0.2, deadline - time.monotonic()))
-            try:
-                line = self.output_queue.get(timeout=remaining)
-            except queue.Empty:
-                if self.process.poll() is not None:
-                    break
-                continue
-            if line is None:
-                if self.process.poll() is not None:
-                    break
-                continue
-            display_id = parse_scrcpy_display_id(line)
-            if display_id:
-                self.logger.info("scrcpy 로그에서 Virtual Display ID %s를 확인했습니다.", display_id)
-                return display_id
-
-        for attempt in range(dump_retries):
-            if _cancel_requested(cancel_event):
-                raise VirtualDisplayError("런처 종료 요청으로 Virtual Display 탐지를 중단했습니다.")
-            after_ids = adb_service.get_virtual_display_ids(serial)
-            display_id = choose_new_display_id(before_ids, after_ids)
-            if display_id:
-                self.logger.info("dumpsys display에서 Virtual Display ID %s를 확인했습니다.", display_id)
-                return display_id
-            if attempt + 1 < dump_retries:
-                self.sleep(dump_delay)
-        raise VirtualDisplayError("Virtual Display ID를 확인하지 못했습니다.")
+    def recent_output(self, limit=20):
+        with self._output_lock:
+            return "\n".join(self._output_lines[-limit:])
 
     def terminate(self, timeout=3):
         try:

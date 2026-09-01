@@ -13,15 +13,16 @@ from game_profiles import get_profile_by_display_name, load_game_profiles
 from launcher_core import (
     DEFAULT_FPS,
     MIRROR_MODE,
+    SUPPORTED_SCRCPY_VERSION,
     VIRTUAL_DISPLAY_MODE,
     AdbServerManager,
     AdbService,
     ScrcpyOptions,
     ScrcpyService,
-    VirtualDisplayError,
     WorkerRegistry,
     build_scrcpy_args,
     device_state_error,
+    get_scrcpy_version,
     load_config,
     normalize_wireless_endpoint,
     orient_resolution,
@@ -32,7 +33,7 @@ from launcher_core import (
 
 
 APP_NAME = "Pokémon PC Launcher"
-APP_VERSION = "0.1"
+APP_VERSION = "0.2"
 MODE_LABELS = {
     VIRTUAL_DISPLAY_MODE: "Virtual Display",
     MIRROR_MODE: "기본 화면 미러링",
@@ -126,7 +127,7 @@ class AppLauncher:
             self.launch_button.configure(state="disabled")
             self._set_status(f"필수 실행 파일 없음: {missing}")
         else:
-            self.root.after(100, self.refresh_devices)
+            self.root.after(100, self._check_scrcpy_version)
 
     def _create_variables(self):
         initial_key = self.config["last_game"]
@@ -143,14 +144,15 @@ class AppLauncher:
         self.fps_var = tk.StringVar(value=self.config["fps"])
         self.borderless_var = tk.BooleanVar(value=self.config["borderless"])
         self.turn_screen_off_var = tk.BooleanVar(value=self.config["turn_screen_off"])
+        self.flex_display_var = tk.BooleanVar(value=self.config["flex_display"])
         self.kill_adb_server_var = tk.BooleanVar(
             value=self.config["kill_adb_server_on_exit"]
         )
         self.status_var = tk.StringVar(value="준비되었습니다.")
 
     def _build_ui(self):
-        self.root.geometry("520x785")
-        self.root.minsize(500, 740)
+        self.root.geometry("520x820")
+        self.root.minsize(500, 775)
         self.root.title(f"{APP_NAME} {APP_VERSION}")
         self.root.columnconfigure(0, weight=1)
 
@@ -257,34 +259,55 @@ class AppLauncher:
         self.custom_height_entry.grid(row=0, column=2)
 
         ttk.Label(display_frame, text="실행 모드").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        ttk.Combobox(
+        self.mode_combo = ttk.Combobox(
             display_frame,
             state="readonly",
             textvariable=self.mode_var,
             values=list(MODE_KEYS),
-        ).grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Label(display_frame, text="FPS 제한").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        )
+        self.mode_combo.grid(
+            row=2,
+            column=1,
+            columnspan=2,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(8, 0),
+        )
+        self.mode_combo.bind("<<ComboboxSelected>>", self._update_flex_state)
+        self.flex_check = ttk.Checkbutton(
+            display_frame,
+            text="창 크기에 자동 맞춤 (Flex Display)",
+            variable=self.flex_display_var,
+        )
+        self.flex_check.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(display_frame, text="최대 전송 FPS").grid(
+            row=4,
+            column=0,
+            sticky="w",
+            pady=(8, 0),
+        )
         ttk.Combobox(
             display_frame,
             state="readonly",
             textvariable=self.fps_var,
             values=FPS_VALUES,
-        ).grid(row=3, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ).grid(row=4, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
         ttk.Checkbutton(
             display_frame,
             text="Borderless Fullscreen",
             variable=self.borderless_var,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Checkbutton(
             display_frame,
             text="스마트폰 실제 화면 끄기",
             variable=self.turn_screen_off_var,
-        ).grid(row=5, column=0, columnspan=2, sticky="w")
+        ).grid(row=6, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(
             display_frame,
             text="종료 시 기존 ADB 서버도 종료 (고급)",
             variable=self.kill_adb_server_var,
-        ).grid(row=6, column=0, columnspan=3, sticky="w")
+        ).grid(row=7, column=0, columnspan=3, sticky="w")
+        self._update_flex_state()
 
         launch_frame = ttk.LabelFrame(container, text="5. 게임 실행", padding=10)
         launch_frame.grid(row=4, column=0, sticky="ew", pady=(0, 8))
@@ -380,6 +403,38 @@ class AppLauncher:
         )
         self.custom_width_entry.configure(state=state)
         self.custom_height_entry.configure(state=state)
+
+    def _update_flex_state(self, _event=None):
+        mode = MODE_KEYS.get(self.mode_var.get())
+        self.flex_check.configure(
+            state="normal" if mode == VIRTUAL_DISPLAY_MODE else "disabled"
+        )
+
+    def _check_scrcpy_version(self):
+        def work():
+            version = get_scrcpy_version(self.binary_paths.scrcpy_path)
+            if version == SUPPORTED_SCRCPY_VERSION:
+                self.logger.info("scrcpy 버전 확인: %s", version)
+            else:
+                found = version or "확인할 수 없음"
+                self.logger.warning(
+                    "지원하지 않는 scrcpy 버전: expected=%s actual=%s",
+                    SUPPORTED_SCRCPY_VERSION,
+                    found,
+                )
+                message = (
+                    f"{APP_NAME} {APP_VERSION}는 scrcpy "
+                    f"{SUPPORTED_SCRCPY_VERSION}을 기준으로 개발되었습니다.\n\n"
+                    f"현재 발견된 버전:\n{found}"
+                )
+                self._post_ui(lambda: messagebox.showwarning(APP_NAME, message))
+            self._post_ui(self.refresh_devices)
+
+        self._start_worker(
+            "scrcpy-version-check",
+            work,
+            "scrcpy 버전을 확인하지 못했습니다.",
+        )
 
     def refresh_devices(self):
         if not self.adb_service:
@@ -600,6 +655,7 @@ class AppLauncher:
         fps = self.fps_var.get()
         borderless = self.borderless_var.get()
         turn_screen_off = self.turn_screen_off_var.get()
+        flex_display = self.flex_display_var.get()
         self.launch_button.configure(state="disabled")
         self._set_status("게임 실행 전 검증을 시작합니다.")
 
@@ -618,29 +674,13 @@ class AppLauncher:
                     raise RuntimeError(
                         f"{profile.display_name}이 선택한 스마트폰에 설치되어 있지 않습니다."
                     )
-                activity = self.adb_service.resolve_launch_activity(
-                    device.serial,
-                    profile.package,
-                    cancel_event=self.closing,
-                )
-                if not activity:
-                    raise RuntimeError(
-                        f"{profile.display_name}의 실행 Activity를 찾지 못했습니다."
-                    )
-                self.logger.info("Activity 탐색 결과: %s", activity)
-                self.adb_service.wake_and_unlock(device.serial)
-                self.adb_service.force_stop(device.serial, profile.package)
-                before_ids = (
-                    self.adb_service.get_virtual_display_ids(device.serial)
-                    if mode == VIRTUAL_DISPLAY_MODE
-                    else set()
-                )
                 options = ScrcpyOptions(
                     mode=mode,
                     resolution=resolution,
                     fps=fps,
                     borderless=borderless,
                     turn_screen_off=turn_screen_off,
+                    flex_display=flex_display,
                 )
                 args = build_scrcpy_args(
                     self.binary_paths.scrcpy_path,
@@ -657,34 +697,23 @@ class AppLauncher:
                 session = self.scrcpy_service.start(args)
                 with self.session_lock:
                     self.scrcpy_session = session
-                if mode == VIRTUAL_DISPLAY_MODE:
-                    display_id = session.wait_for_virtual_display(
-                        self.adb_service,
-                        device.serial,
-                        before_ids,
-                        cancel_event=self.closing,
+                early_exit = session.wait_for_early_exit()
+                if early_exit is not None:
+                    details = session.recent_output()
+                    suffix = f"\n\n{details}" if details else ""
+                    raise RuntimeError(
+                        f"scrcpy가 시작 직후 종료되었습니다. exit code: {early_exit}{suffix}"
                     )
-                else:
-                    display_id = 0
-                    self.logger.info("사용자가 기본 화면 미러링 모드를 선택했습니다.")
-                self.logger.info("게임 실행 display ID: %s", display_id)
-                if not self.adb_service.launch_activity(device.serial, activity, display_id):
-                    raise RuntimeError("Android 게임 Activity 실행 명령이 실패했습니다.")
-                if not self.adb_service.wait_for_app_running(
-                    device.serial,
-                    profile.package,
-                    cancel_event=self.closing,
-                ):
-                    raise RuntimeError("게임 프로세스의 정상 실행을 확인하지 못했습니다.")
                 started = True
-                self.logger.info("게임 실행 확인 완료: %s", profile.display_name)
+                self.logger.info("scrcpy session 시작 확인: %s", profile.display_name)
                 self._post_ui(lambda: self._on_game_started(profile))
                 exit_code = session.wait()
                 self.logger.info("scrcpy 종료: exit_code=%s", exit_code)
-            except VirtualDisplayError as exc:
-                self.logger.error("Virtual Display 생성 실패: %s", exc)
-                message = str(exc)
-                self._post_ui(lambda: messagebox.showerror(APP_NAME, message))
+                if exit_code != 0 and not self.closing.is_set():
+                    details = session.recent_output()
+                    suffix = f"\n\n{details}" if details else ""
+                    message = f"scrcpy가 오류로 종료되었습니다. exit code: {exit_code}{suffix}"
+                    self._post_ui(lambda: messagebox.showerror(APP_NAME, message))
             except Exception:
                 self.logger.exception("게임 실행에 실패했습니다.")
                 message = str(sys.exc_info()[1])
@@ -743,6 +772,7 @@ class AppLauncher:
                 "fps": self.fps_var.get(),
                 "borderless": self.borderless_var.get(),
                 "turn_screen_off": self.turn_screen_off_var.get(),
+                "flex_display": self.flex_display_var.get(),
                 "kill_adb_server_on_exit": self.kill_adb_server_var.get(),
                 "wireless_ip": self.wireless_ip_var.get(),
             }

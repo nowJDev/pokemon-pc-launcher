@@ -3,7 +3,6 @@
 import io
 import json
 from pathlib import Path
-import queue
 import subprocess
 import tempfile
 import threading
@@ -26,7 +25,6 @@ EXTENDED_CORE_NAMES = {
     "BinaryPaths",
     "ScrcpyService",
     "ScrcpySession",
-    "VirtualDisplayError",
     "load_config",
     "save_config",
     "resolve_binary_paths",
@@ -66,6 +64,19 @@ class LauncherCoreAvailabilityTests(unittest.TestCase):
         missing = sorted(name for name in RUNTIME_CORE_NAMES if not hasattr(launcher_core, name))
 
         self.assertEqual(missing, [])
+
+    @unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
+    def test_removed_android_control_contracts_do_not_return(self):
+        removed = {
+            "VirtualDisplayError",
+            "choose_new_display_id",
+            "parse_dumpsys_launch_activity",
+            "parse_resolve_activity",
+            "parse_scrcpy_display_id",
+            "parse_virtual_display_ids",
+        }
+
+        self.assertEqual(sorted(name for name in removed if hasattr(launcher_core, name)), [])
 
 
 @unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
@@ -107,36 +118,6 @@ USB123 device
 
         self.assertIn("jp.pokemon.pokemonchampions", packages)
         self.assertNotIn("jp.pokemon.pokemonchampion", packages)
-
-    def test_resolve_activity_accepts_only_selected_package(self):
-        output = "priority=0 preferredOrder=0\njp.pokemon.pokemontcgp/.MainActivity\n"
-
-        component = launcher_core.parse_resolve_activity(output, "jp.pokemon.pokemontcgp")
-
-        self.assertEqual(component, "jp.pokemon.pokemontcgp/.MainActivity")
-        self.assertIsNone(
-            launcher_core.parse_resolve_activity(
-                "other.package/.MainActivity",
-                "jp.pokemon.pokemontcgp",
-            )
-        )
-
-    def test_dumpsys_activity_fallback_requires_main_and_launcher(self):
-        output = """Activity Resolver Table:
-  Non-Data Actions:
-      android.intent.action.MAIN:
-        93e12a1 jp.pokemon.pokemontcgp/com.example.GameEntry filter 60a
-          Action: "android.intent.action.MAIN"
-          Category: "android.intent.category.LAUNCHER"
-"""
-
-        component = launcher_core.parse_dumpsys_launch_activity(
-            output,
-            "jp.pokemon.pokemontcgp",
-        )
-
-        self.assertEqual(component, "jp.pokemon.pokemontcgp/com.example.GameEntry")
-
 
 @unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
 class IpDetectionTests(unittest.TestCase):
@@ -186,38 +167,6 @@ class IpDetectionTests(unittest.TestCase):
 
         self.assertEqual(selected, "192.168.20.15")
         self.assertEqual(candidates[0], "192.168.20.15")
-
-
-@unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
-class DisplayParserTests(unittest.TestCase):
-    def test_scrcpy_log_display_id_rejects_display_zero(self):
-        self.assertEqual(
-            launcher_core.parse_scrcpy_display_id(
-                "[server] INFO: New display: 1280x720/320 (id=49)"
-            ),
-            49,
-        )
-        self.assertIsNone(
-            launcher_core.parse_scrcpy_display_id(
-                "[server] INFO: New display: 1280x720/320 (id=0)"
-            )
-        )
-
-    def test_dumpsys_parser_finds_only_named_virtual_displays(self):
-        output = """DisplayInfo{"scrcpy", displayId 49, FLAG_SECURE}
-DisplayInfo{"Built-in Screen", displayId 0, FLAG_DEFAULT_DISPLAY}
-DisplayViewport{type=VIRTUAL, valid=true, displayId=52, uniqueId='virtual:android.hardware.display.DisplayManagerService:com.genymobile.scrcpy'}
-"""
-
-        ids = launcher_core.parse_virtual_display_ids(output)
-
-        self.assertEqual(ids, {49, 52})
-
-    def test_new_display_selection_requires_one_unambiguous_nonzero_id(self):
-        self.assertEqual(launcher_core.choose_new_display_id({41}, {41, 49}), 49)
-        self.assertIsNone(launcher_core.choose_new_display_id({41}, {41}))
-        self.assertIsNone(launcher_core.choose_new_display_id({41}, {41, 49, 50}))
-        self.assertIsNone(launcher_core.choose_new_display_id(set(), {0}))
 
 
 @unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
@@ -275,14 +224,18 @@ class ResolutionAndConfigTests(unittest.TestCase):
         self.assertEqual(loaded["wireless_ip"], "192.168.0.16")
         self.assertIn("kill_adb_server_on_exit", loaded)
         self.assertFalse(loaded.get("kill_adb_server_on_exit"))
+        self.assertFalse(loaded["flex_display"])
+
+    def test_v01_config_accepts_new_flex_display_option(self):
+        loaded = launcher_core.normalize_config({"flex_display": True})
+
+        self.assertTrue(loaded["flex_display"])
 
 
 @unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
 class ScrcpyArgumentTests(unittest.TestCase):
-    def setUp(self):
-        self.profile = game_profiles.load_game_profiles()["pokemon_champions"]
-
-    def test_virtual_display_arguments_preserve_existing_options(self):
+    def test_champions_virtual_display_uses_native_app_launch(self):
+        profile = game_profiles.load_game_profiles()["pokemon_champions"]
         options = launcher_core.ScrcpyOptions(
             mode="virtual_display",
             resolution="1920x1080",
@@ -294,12 +247,15 @@ class ScrcpyArgumentTests(unittest.TestCase):
         args = launcher_core.build_scrcpy_args(
             "scrcpy.exe",
             "USB123",
-            self.profile,
+            profile,
             options,
         )
 
+        self.assertEqual(args[:3], ["scrcpy.exe", "-s", "USB123"])
         self.assertIn("--new-display=1920x1080/320", args)
         self.assertIn("--no-vd-system-decorations", args)
+        self.assertIn("--start-app=+jp.pokemon.pokemonchampions", args)
+        self.assertIn("--keep-active", args)
         self.assertIn("--stay-awake", args)
         self.assertIn("--turn-screen-off", args)
         self.assertIn("--window-borderless", args)
@@ -307,26 +263,53 @@ class ScrcpyArgumentTests(unittest.TestCase):
         self.assertIn("--max-fps=60", args)
         self.assertIn("--window-title=Pokémon Champions", args)
 
-    def test_mirror_mode_does_not_create_virtual_display(self):
+    def test_pocket_virtual_display_uses_profile_dpi_and_flex(self):
+        profile = game_profiles.load_game_profiles()["pokemon_tcgpocket"]
+        options = launcher_core.ScrcpyOptions(
+            mode="virtual_display",
+            resolution="1080x1920",
+            flex_display=True,
+        )
+
+        args = launcher_core.build_scrcpy_args("scrcpy.exe", "USB456", profile, options)
+
+        self.assertIn("--new-display=1080x1920/320", args)
+        self.assertIn("--start-app=+jp.pokemon.pokemontcgp", args)
+        self.assertIn("--flex-display", args)
+
+    def test_champions_mirror_uses_native_app_launch_and_max_size(self):
+        profile = game_profiles.load_game_profiles()["pokemon_champions"]
         options = launcher_core.ScrcpyOptions(
             mode="mirror",
-            resolution="720x1280",
+            resolution="1920x1080",
             fps="제한 없음 (기본값)",
             borderless=False,
             turn_screen_off=False,
+            flex_display=True,
         )
 
         args = launcher_core.build_scrcpy_args(
             "scrcpy.exe",
             "USB123",
-            self.profile,
+            profile,
             options,
         )
 
         self.assertFalse(any(arg.startswith("--new-display") for arg in args))
         self.assertNotIn("--no-vd-system-decorations", args)
         self.assertFalse(any(arg.startswith("--max-fps") for arg in args))
+        self.assertIn("--max-size=1920", args)
+        self.assertIn("--start-app=+jp.pokemon.pokemonchampions", args)
+        self.assertNotIn("--flex-display", args)
+
+    def test_pocket_mirror_uses_native_app_launch(self):
+        profile = game_profiles.load_game_profiles()["pokemon_tcgpocket"]
+        options = launcher_core.ScrcpyOptions(mode="mirror", resolution="720x1280")
+
+        args = launcher_core.build_scrcpy_args("scrcpy.exe", "192.168.0.8:5555", profile, options)
+
         self.assertIn("--max-size=1280", args)
+        self.assertIn("--start-app=+jp.pokemon.pokemontcgp", args)
 
 
 @unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
@@ -381,20 +364,6 @@ class CommandAndAdbServiceTests(unittest.TestCase):
 
         self.assertFalse(connected)
 
-    def test_activity_resolution_uses_query_then_dumpsys_fallbacks(self):
-        runner = mock.Mock()
-        runner.run.side_effect = [
-            launcher_core.CommandResult("No activity found", "", 0),
-            launcher_core.CommandResult("jp.pokemon.pokemontcgp/.Entry", "", 0),
-        ]
-        service = launcher_core.AdbService("adb.exe", runner=runner, sleep=lambda _: None)
-
-        component = service.resolve_launch_activity("USB123", "jp.pokemon.pokemontcgp")
-
-        self.assertEqual(component, "jp.pokemon.pokemontcgp/.Entry")
-        self.assertEqual(runner.run.call_count, 2)
-
-
 @unittest.skipUnless(EXTENDED_CORE_AVAILABLE, "확장 core 계약이 아직 없다.")
 class ConfigAndBinaryTests(unittest.TestCase):
     def test_config_round_trip_is_normalized(self):
@@ -437,15 +406,14 @@ class ConfigAndBinaryTests(unittest.TestCase):
     def test_binary_paths_use_bundled_layout_and_report_missing_files(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            (base / "bin" / "adb").mkdir(parents=True)
             (base / "bin" / "scrcpy").mkdir(parents=True)
-            (base / "bin" / "adb" / "adb.exe").write_bytes(b"adb")
+            (base / "bin" / "scrcpy" / "adb.exe").write_bytes(b"adb")
             (base / "bin" / "scrcpy" / "scrcpy.exe").write_bytes(b"scrcpy")
 
             paths = launcher_core.resolve_binary_paths(base)
             missing = launcher_core.resolve_binary_paths(base / "empty")
 
-        self.assertTrue(paths.adb_path.endswith("bin\\adb\\adb.exe") or paths.adb_path.endswith("bin/adb/adb.exe"))
+        self.assertTrue(paths.adb_path.endswith("bin\\scrcpy\\adb.exe") or paths.adb_path.endswith("bin/scrcpy/adb.exe"))
         self.assertTrue(paths.scrcpy_path.endswith("bin\\scrcpy\\scrcpy.exe") or paths.scrcpy_path.endswith("bin/scrcpy/scrcpy.exe"))
         self.assertEqual(paths.missing, ())
         self.assertEqual(set(missing.missing), {"ADB", "scrcpy"})
@@ -529,113 +497,37 @@ class ExtendedAdbServiceTests(unittest.TestCase):
         self.assertTrue(disconnected)
         self.assertIn("usb", runner.run.call_args_list[0].args[0])
 
-    def test_activity_launch_uses_explicit_display_and_waits_for_result(self):
-        runner = mock.Mock()
-        runner.run.return_value = launcher_core.CommandResult(
-            "Starting: Intent { cmp=jp.pokemon/.Main }\nStatus: ok",
-            "",
-            0,
-        )
-        service = launcher_core.AdbService("adb.exe", runner=runner)
-
-        launched = service.launch_activity("USB123", "jp.pokemon/.Main", 49)
-
-        self.assertTrue(launched)
-        command = runner.run.call_args.args[0]
-        self.assertIn("--display", command)
-        self.assertIn("49", command)
-        self.assertIn("-W", command)
-
-    def test_app_running_uses_pidof_then_activity_fallback(self):
-        runner = mock.Mock()
-        runner.run.side_effect = [
-            launcher_core.CommandResult("", "", 1),
-            launcher_core.CommandResult("mResumedActivity: jp.pokemon/.Main", "", 0),
-        ]
-        service = launcher_core.AdbService("adb.exe", runner=runner)
-
-        self.assertTrue(service.is_app_running("USB123", "jp.pokemon"))
-
-    def test_virtual_display_ids_are_read_through_adb_service(self):
-        runner = mock.Mock()
-        runner.run.return_value = launcher_core.CommandResult(
-            'DisplayInfo{"scrcpy", displayId 49}',
-            "",
-            0,
-        )
-        service = launcher_core.AdbService("adb.exe", runner=runner)
-
-        self.assertEqual(service.get_virtual_display_ids("USB123"), {49})
-
-
 @unittest.skipUnless(EXTENDED_CORE_AVAILABLE, "확장 core 계약이 아직 없다.")
 class ScrcpySessionTests(unittest.TestCase):
-    def test_log_line_display_id_wins_without_dumpsys(self):
-        output_queue = queue.Queue()
-        output_queue.put("[server] INFO: New display: 1280x720/320 (id=49)")
+    def test_early_exit_returns_exit_code(self):
         process = mock.Mock()
-        process.poll.return_value = None
-        adb_service = mock.Mock()
-        session = launcher_core.ScrcpySession(
-            process,
-            output_queue=output_queue,
-            sleep=lambda _: None,
-        )
+        process.stdout = None
+        process.wait.return_value = 1
+        session = launcher_core.ScrcpySession(process)
 
-        display_id = session.wait_for_virtual_display(
-            adb_service,
-            "USB123",
-            before_ids={41},
-            log_timeout=0.1,
-            dump_retries=1,
-            dump_delay=0,
-        )
+        self.assertEqual(session.wait_for_early_exit(timeout=1), 1)
+        process.wait.assert_called_once_with(timeout=1)
 
-        self.assertEqual(display_id, 49)
-        adb_service.get_virtual_display_ids.assert_not_called()
-
-    def test_dumpsys_retries_until_one_new_display_appears(self):
+    def test_running_process_has_no_early_exit(self):
         process = mock.Mock()
-        process.poll.return_value = None
-        adb_service = mock.Mock()
-        adb_service.get_virtual_display_ids.side_effect = [{41}, {41, 49}]
-        session = launcher_core.ScrcpySession(
-            process,
-            output_queue=queue.Queue(),
-            sleep=lambda _: None,
-        )
+        process.stdout = None
+        process.wait.side_effect = subprocess.TimeoutExpired(["scrcpy"], 1)
+        session = launcher_core.ScrcpySession(process)
 
-        display_id = session.wait_for_virtual_display(
-            adb_service,
-            "USB123",
-            before_ids={41},
-            log_timeout=0,
-            dump_retries=2,
-            dump_delay=0,
-        )
+        self.assertIsNone(session.wait_for_early_exit(timeout=1))
 
-        self.assertEqual(display_id, 49)
-
-    def test_display_detection_failure_never_returns_display_zero(self):
+    def test_normal_exit_wait_closes_stdout_pipe(self):
         process = mock.Mock()
-        process.poll.return_value = None
-        adb_service = mock.Mock()
-        adb_service.get_virtual_display_ids.return_value = {0, 41}
-        session = launcher_core.ScrcpySession(
-            process,
-            output_queue=queue.Queue(),
-            sleep=lambda _: None,
-        )
+        process.stdout = None
+        process.poll.return_value = 0
+        process.wait.return_value = 0
+        session = launcher_core.ScrcpySession(process)
+        process.stdout = mock.Mock()
+        process.stdout.closed = False
 
-        with self.assertRaises(launcher_core.VirtualDisplayError):
-            session.wait_for_virtual_display(
-                adb_service,
-                "USB123",
-                before_ids={41},
-                log_timeout=0,
-                dump_retries=2,
-                dump_delay=0,
-            )
+        self.assertEqual(session.wait(), 0)
+
+        process.stdout.close.assert_called_once()
 
     def test_terminate_waits_then_kills_only_on_timeout(self):
         process = mock.Mock()
@@ -645,8 +537,6 @@ class ScrcpySessionTests(unittest.TestCase):
         process.wait.side_effect = [subprocess.TimeoutExpired(["scrcpy"], 3), 0]
         session = launcher_core.ScrcpySession(
             process,
-            output_queue=queue.Queue(),
-            sleep=lambda _: None,
         )
 
         session.terminate(timeout=3)
@@ -667,6 +557,32 @@ class ScrcpySessionTests(unittest.TestCase):
         self.assertEqual(popen.call_args.kwargs["stdout"], subprocess.PIPE)
 
 
+@unittest.skipIf(CORE_UNAVAILABLE, "핵심 모듈이 아직 없다.")
+class ScrcpyVersionTests(unittest.TestCase):
+    def test_version_parser_accepts_official_output(self):
+        output = "scrcpy 4.1 <https://github.com/Genymobile/scrcpy>\n\nDependencies:\n"
+
+        self.assertEqual(launcher_core.parse_scrcpy_version(output), "4.1")
+
+    def test_version_parser_rejects_unrelated_output(self):
+        self.assertIsNone(launcher_core.parse_scrcpy_version("not scrcpy"))
+
+    def test_version_query_uses_bounded_command(self):
+        runner = mock.Mock()
+        runner.run.return_value = launcher_core.CommandResult("scrcpy 4.1\n", "", 0)
+
+        version = launcher_core.get_scrcpy_version("scrcpy.exe", runner=runner)
+
+        self.assertEqual(version, "4.1")
+        runner.run.assert_called_once_with(["scrcpy.exe", "--version"], timeout=5)
+
+    def test_version_query_returns_none_on_failure(self):
+        runner = mock.Mock()
+        runner.run.return_value = launcher_core.CommandResult("", "missing DLL", 1)
+
+        self.assertIsNone(launcher_core.get_scrcpy_version("scrcpy.exe", runner=runner))
+
+
 @unittest.skipUnless(ADB_MANAGER_AVAILABLE, "ADB server manager가 아직 없다.")
 class AdbServerManagerTests(unittest.TestCase):
     def test_launcher_owned_bundled_server_is_stopped_automatically(self):
@@ -674,7 +590,7 @@ class AdbServerManagerTests(unittest.TestCase):
         runner.run.side_effect = [
             launcher_core.CommandResult("List of devices attached\n", "", 0),
             launcher_core.CommandResult(
-                'executable_absolute_path: "C:\\\\app\\\\bin\\\\adb\\\\adb.exe"',
+                'executable_absolute_path: "C:\\\\app\\\\bin\\\\scrcpy\\\\adb.exe"',
                 "",
                 0,
             ),
@@ -682,13 +598,13 @@ class AdbServerManagerTests(unittest.TestCase):
         ]
         probe = mock.Mock(side_effect=[False, False, False])
         manager = launcher_core.AdbServerManager(
-            r"C:\app\bin\adb\adb.exe",
+            r"C:\app\bin\scrcpy\adb.exe",
             runner=runner,
             server_probe=probe,
             sleep=lambda _: None,
         )
 
-        manager.run([r"C:\app\bin\adb\adb.exe", "devices"], timeout=5)
+        manager.run([r"C:\app\bin\scrcpy\adb.exe", "devices"], timeout=5)
         stopped = manager.shutdown(force_preexisting=False)
 
         self.assertTrue(manager.started_by_launcher)
@@ -823,30 +739,6 @@ class RuntimeCleanupTests(unittest.TestCase):
 
         self.assertEqual(alive, ["blocked-worker"])
 
-    def test_wake_unlock_and_force_stop_use_bounded_commands(self):
-        runner = mock.Mock()
-        runner.run.return_value = launcher_core.CommandResult("", "", 0)
-        service = launcher_core.AdbService("adb.exe", runner=runner)
-
-        self.assertTrue(service.wake_and_unlock("USB123"))
-        self.assertTrue(service.force_stop("USB123", "jp.pokemon"))
-
-        commands = [call.args[0] for call in runner.run.call_args_list]
-        self.assertTrue(any("KEYCODE_WAKEUP" in command for command in commands))
-        self.assertTrue(any("dismiss-keyguard" in command for command in commands))
-        self.assertTrue(any("force-stop" in command for command in commands))
-
-    def test_wait_for_app_running_retries_with_condition_check(self):
-        runner = mock.Mock()
-        runner.run.side_effect = [
-            launcher_core.CommandResult("", "", 1),
-            launcher_core.CommandResult("no matching activity", "", 0),
-            launcher_core.CommandResult("1234", "", 0),
-        ]
-        service = launcher_core.AdbService("adb.exe", runner=runner, sleep=lambda _: None)
-
-        self.assertTrue(service.wait_for_app_running("USB123", "jp.pokemon", retries=2, delay=0))
-
     def test_wireless_retry_stops_when_shutdown_is_requested(self):
         runner = mock.Mock()
         cancelled = threading.Event()
@@ -860,29 +752,6 @@ class RuntimeCleanupTests(unittest.TestCase):
 
         self.assertFalse(connected)
         runner.run.assert_not_called()
-
-    def test_display_detection_stops_when_shutdown_is_requested(self):
-        process = mock.Mock()
-        process.poll.return_value = None
-        adb_service = mock.Mock()
-        cancelled = threading.Event()
-        cancelled.set()
-        session = launcher_core.ScrcpySession(
-            process,
-            output_queue=queue.Queue(),
-            sleep=lambda _: None,
-        )
-
-        with self.assertRaises(launcher_core.VirtualDisplayError):
-            session.wait_for_virtual_display(
-                adb_service,
-                "USB123",
-                before_ids=set(),
-                cancel_event=cancelled,
-            )
-
-        adb_service.get_virtual_display_ids.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()

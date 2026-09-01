@@ -4,7 +4,7 @@
 
 Android 기기에 설치된 게임을 PC의 독립 창 또는 기본 화면 미러링으로 실행합니다.
 
-> **개발 상태:** 현재 버전은 기능 안정화 단계인 **0.1**입니다. 실제 기기 조합에서 주요 시나리오를 모두 검증한 뒤에만 1.0으로 올릴 예정입니다.
+> **개발 상태:** 현재 버전은 기능 안정화 단계인 **0.2**입니다. 실제 기기 조합에서 주요 시나리오를 모두 검증한 뒤에만 1.0으로 올릴 예정입니다.
 
 이 저장소에는 Pokémon 게임 자체가 포함되어 있지 않습니다. 사용자가 소유한 Android 기기에 게임을 직접 설치해야 합니다.
 
@@ -24,10 +24,11 @@ Pokémon TCG Pocket의 Virtual Display 호환성은 기기와 Android 버전에 
 - USB 기기의 TCP/IP 5555 자동 설정과 연결 상태 재검증.
 - 수동 무선 ADB 연결 및 연결 해제.
 - 게임별 기본 해상도, 사용자 지정 해상도, 기기 원본 해상도.
-- FPS 제한, Borderless Fullscreen, 스마트폰 화면 끄기, stay-awake.
-- Virtual Display 생성 후 실제 display ID 탐색과 선택 게임 자동 실행.
-- 기본 Android display 0을 사용하는 명시적 미러링 호환 모드.
-- Package 설치 여부와 launchable Activity 자동 탐색.
+- 최대 전송 FPS 제한, Borderless Fullscreen, 스마트폰 화면 끄기.
+- scrcpy 4.1의 `--new-display`와 `--start-app`을 사용하는 Virtual Display 실행.
+- `--start-app`과 `--max-size`를 사용하는 기본 화면 미러링 호환 모드.
+- 기본 OFF인 Flex Display와 package 설치 여부 표시.
+- bundled scrcpy 4.1 버전 검사와 불일치 경고.
 - 종료 시 scrcpy, pipe, worker, 런처가 생성한 무선 연결과 ADB server 정리.
 
 ## 실행 전 준비
@@ -54,10 +55,8 @@ Pokémon TCG Pocket의 Virtual Display 호환성은 기기와 Android 버전에 
 1. 선택 게임과 기기.
 2. 기기의 현재 ADB 상태.
 3. 선택 게임 package의 정확한 설치 여부.
-4. Android Package Manager가 반환하는 launchable Activity.
-5. 해상도와 실행 옵션.
-6. scrcpy 실행과 Virtual Display ID.
-7. Activity 실행과 게임 프로세스 상태.
+4. 해상도와 실행 옵션.
+5. scrcpy 4.1 process의 시작 상태와 조기 오류 종료.
 
 어느 단계에서든 실패하면 다음 단계로 넘어가지 않으며 `launcher.log`에 진단 내용을 남깁니다.
 
@@ -65,11 +64,19 @@ Pokémon TCG Pocket의 Virtual Display 호환성은 기기와 Android 버전에 
 
 ### Virtual Display
 
-scrcpy의 `--new-display=WIDTHxHEIGHT/DPI`로 새 Android display를 만든 뒤, scrcpy 로그와 `dumpsys display`를 이용해 새 display ID를 확인합니다. ID를 찾지 못하면 display 0으로 전환하지 않고 오류로 종료합니다.
+scrcpy 4.1의 `--new-display=WIDTHxHEIGHT/DPI`와 `--start-app=+PACKAGE`를 함께 사용합니다. Virtual Display 생성·앱 force-stop 후 실행·display lifecycle은 scrcpy가 담당하며 런처는 display ID를 직접 찾거나 `dumpsys display`를 호출하지 않습니다.
+
+`창 크기에 자동 맞춤 (Flex Display)`을 켜면 scrcpy의 `--flex-display`가 Virtual Display 크기를 창에 맞춰 계속 조정합니다. 게임별 runtime resize 호환성이 다를 수 있어 기본값은 꺼져 있습니다.
 
 ### 기본 화면 미러링
 
-선택한 앱을 Android 기본 display 0에서 실행하고 일반 scrcpy 미러링을 사용합니다. 선택 해상도의 긴 변은 scrcpy `--max-size`에 적용됩니다. Virtual Display에서 렌더링되지 않는 게임이나 기기의 호환 모드입니다.
+scrcpy 4.1의 `--start-app=+PACKAGE`로 선택한 앱을 실행하고 일반 화면을 미러링합니다. 선택 해상도의 긴 변은 `--max-size`에 적용됩니다. Virtual Display에서 렌더링되지 않는 게임이나 기기의 호환 모드입니다.
+
+두 모드는 `--keep-active`로 사용자 활동을 모사해 화면을 유지하고, 기존 충전 중 화면 유지 동작을 보존하기 위해 `--stay-awake`도 함께 사용합니다.
+
+## 최대 전송 FPS.
+
+`최대 전송 FPS`는 scrcpy의 화면 캡처·전송 상한입니다. 게임 자체의 FPS 제한을 해제하거나 30 FPS 게임을 144 FPS로 변환하지 않습니다.
 
 ## 무선 ADB 보안
 
@@ -89,9 +96,9 @@ scrcpy의 `--new-display=WIDTHxHEIGHT/DPI`로 새 Android display를 만든 뒤,
 
 ## 설정과 로그
 
-- `config.json`은 마지막 게임, 실행 모드, 게임별 해상도, 사용자 지정 해상도, FPS와 화면 옵션, 무선 IP를 저장합니다.
+- `config.json`은 마지막 게임, 실행 모드, 게임별 해상도, 사용자 지정 해상도, Flex Display, FPS와 화면 옵션, 무선 IP를 저장합니다.
 - 이전 Champions 전용 `config.json`도 자동으로 새 구조에 병합합니다.
-- `launcher.log`는 ADB, IP 탐색, Activity, display ID, 게임 실행과 종료 결과를 기록합니다.
+- `launcher.log`는 scrcpy 버전, ADB, IP 탐색, 선택 게임, scrcpy session과 종료 결과를 기록합니다.
 
 이 파일들은 실행 중 생성되며 Git에는 포함하지 않습니다.
 
@@ -104,13 +111,13 @@ python -m unittest discover -v
 python pokemon_launcher.py
 ```
 
-Android 기기가 필요 없는 테스트는 프로필, ADB 출력 파싱, Activity와 display ID 파싱, RFC1918 IP 판별, 해상도, 설정 마이그레이션, scrcpy 인자와 process 수명주기를 검증합니다.
+Android 기기가 필요 없는 테스트는 프로필, ADB 출력과 RFC1918 IP 판별, 해상도, 0.1 설정 마이그레이션, scrcpy 4.1 인자·버전과 process 수명주기를 검증합니다.
 
 실제 기기에서는 Champions와 TCG Pocket 각각 USB·Wi-Fi·Virtual Display·기본 미러링 조합을 확인해야 합니다. 종료 후 작업 관리자에서 런처, scrcpy, 불필요한 bundled ADB process가 남지 않는지와 프로그램 폴더의 이름 변경 및 삭제 가능 여부도 확인해야 합니다.
 
 ## 새 게임 프로필 추가
 
-공식 지원 대상을 늘릴 때는 `game_profiles.py`에 package, 화면 방향, 기본 해상도, 해상도 목록과 DPI를 추가합니다. Activity 이름은 프로필에 넣지 않습니다. 런처가 Android Package Manager에서 실제 launchable Activity를 탐색합니다.
+공식 지원 대상을 늘릴 때는 `game_profiles.py`에 package, 화면 방향, 기본 해상도, 해상도 목록과 DPI를 추가합니다. Activity 이름은 프로필에 넣지 않으며 scrcpy가 package 이름으로 앱을 실행합니다.
 
 ## 제3자 구성요소와 라이선스
 
@@ -124,8 +131,8 @@ Android 기기가 필요 없는 테스트는 프로필, ADB 출력 파싱, Activ
 
 ## English summary
 
-Pokémon PC Launcher 0.1 is an unofficial Windows launcher that controls ADB and scrcpy to display games already installed on the user's Android device. It currently supports Pokémon Champions and Pokémon TCG Pocket profiles. No game files are included.
+Pokémon PC Launcher 0.2 is an unofficial Windows launcher built around the native app-launch and virtual-display features of scrcpy 4.1. It displays games already installed on the user's Android device and currently supports Pokémon Champions and Pokémon TCG Pocket profiles. No game files are included.
 
-Choose Virtual Display for an independent Android display or Basic Screen Mirroring for compatibility. The launcher resolves the real launchable Activity from Android Package Manager and never guesses an Activity name. A Virtual Display detection failure is reported instead of silently launching on display 0.
+Choose Virtual Display for an independent Android display or Basic Screen Mirroring for compatibility. App launch uses `--start-app=+PACKAGE`; the launcher does not resolve Activity names or detect Android display IDs. Flex Display is optional and disabled by default pending real-device compatibility testing.
 
 Wireless ADB uses TCP port 5555. Use it only on trusted networks and disconnect it after use. Version 1.0 is reserved for completion of real-device stabilization tests.
