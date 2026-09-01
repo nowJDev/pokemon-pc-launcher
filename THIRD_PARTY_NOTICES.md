@@ -37,32 +37,37 @@
 ### Android Debug Bridge와 Windows ADB DLL
 
 - `adb version`에서 Android Debug Bridge 37.0.0으로 확인했습니다.
-- 파일은 공식 scrcpy 4.0 Windows ZIP의 대응 파일과 해시가 일치합니다.
-- TODO: 배포 전에 해당 Platform-Tools 배포본에 적용되는 Google/AOSP 라이선스와 NOTICE 원문을 공식 배포 패키지에서 추출해 `licenses/`에 포함해야 합니다.
+- 파일은 공식 scrcpy 4.0 Windows ZIP뿐 아니라 Google의 `platform-tools_r37.0.0-win.zip` 대응 파일과도 SHA-256이 일치합니다.
+- Google 공식 ZIP의 SHA-256은 `4fe305812db074cea32903a489d061eb4454cbc90a49e8fea677f4b7af764918`입니다.
+- 공식 배포본의 `NOTICE.txt` 원문을 `licenses/Android-Platform-Tools-37.0.0-NOTICE.txt`에 포함했습니다.
 
 ### SDL3
 
 - `SDL3.dll`은 공식 scrcpy 4.0 Windows ZIP과 해시가 일치합니다.
-- SDL upstream 원문은 [SDL LICENSE.txt](https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt)에서 확인할 수 있습니다.
-- TODO: 정확한 SDL 빌드 버전의 LICENSE 원문을 배포물의 `licenses/SDL.txt`에 포함해야 합니다.
+- scrcpy 4.0 빌드 스크립트와 `scrcpy --version`에서 SDL 3.4.8을 확인했습니다.
+- 해당 태그의 원문을 `licenses/SDL-3.4.8.txt`에 포함했습니다.
 
 ### FFmpeg libraries
 
 - `avcodec-62.dll`, `avformat-62.dll`, `avutil-60.dll`, `swresample-6.dll`은 공식 scrcpy 4.0 Windows ZIP과 해시가 일치합니다.
-- FFmpeg는 빌드 구성에 따라 적용 조건이 달라질 수 있다고 공식 법률 안내에서 설명합니다.
+- scrcpy 4.0의 공식 빌드 스크립트와 DLL 내부 버전·configure 문자열에서 FFmpeg 8.1.1을 확인했습니다.
+- configure 문자열에는 `--enable-gpl`과 `--enable-nonfree`가 없고 각 DLL은 `LGPL version 2.1 or later`로 보고합니다.
+- FFmpeg 라이선스 안내와 LGPL 2.1 원문을 `licenses/FFmpeg-8.1.1-LICENSE.md`, `licenses/FFmpeg-LGPL-2.1.txt`에 포함했습니다.
+- 빌드에 정적으로 포함된 dav1d 1.5.3과 zlib 1.3.1의 라이선스·특허 고지도 `licenses/`에 포함했습니다.
 - 공식 안내는 [FFmpeg License and Legal Considerations](https://ffmpeg.org/legal.html)입니다.
-- TODO: scrcpy 4.0 Windows release의 실제 FFmpeg configure 옵션과 소스 제공 의무를 확인하고, 정확한 LGPL/GPL 원문과 필요한 소스 링크 또는 제공물을 배포본에 추가해야 합니다.
+- 남은 작업은 공개 바이너리 Release에 정확한 FFmpeg 8.1.1 대응 소스와 scrcpy 4.0 빌드 스크립트를 같은 다운로드 위치에서 제공하는 것입니다.
 
 ### libusb
 
 - `libusb-1.0.dll`은 공식 scrcpy 4.0 Windows ZIP과 해시가 일치합니다.
-- upstream 원문은 [libusb COPYING](https://github.com/libusb/libusb/blob/master/COPYING)에서 확인할 수 있습니다.
-- TODO: 공식 scrcpy 4.0 빌드에 사용된 정확한 libusb 버전의 COPYING 원문을 배포물의 `licenses/libusb.txt`에 포함해야 합니다.
+- scrcpy 4.0 빌드 스크립트와 `scrcpy --version`에서 libusb 1.0.29를 확인했습니다.
+- 해당 태그의 원문을 `licenses/libusb-1.0.29.txt`에 포함했습니다.
 
-## 아직 확인하지 않은 파일
+## 기타 정리
 
-- `bin/aapt.exe`와 `bin/aapt-arm-pie`는 scrcpy 4.0 ZIP에 없으며 현재 Python 런처에서 사용하지 않습니다.
-- TODO: 두 파일의 출처, 버전, 실제 필요 여부와 적용 라이선스를 확인하기 전에는 새 배포본에 포함하지 않습니다. 확인 없이 삭제하지도 않습니다.
+- `bin/aapt.exe`는 Android Asset Packaging Tool v0.2-11948202였지만 런처에서 사용하지 않았습니다.
+- `bin/aapt-arm-pie`는 실행 파일이 아니라 HTML 오류 페이지가 잘못 저장된 파일이었습니다.
+- 두 파일 모두 런타임 호출과 기존 기능에 영향이 없어 0.1 배포 대상과 저장소에서 제거했습니다.
 - APK에서 추출했던 기존 아이콘은 2026-09-01에 제거했습니다.
 - 현재 `pokemon_icon.ico`와 `bin/scrcpy/pokemon_icon.ico`는 생성형 이미지로 제작한 독자적인 PC·스마트폰 연결 아이콘입니다.
 - 승인된 PNG 원본은 `assets/launcher_icon.png`에 보존하며 Pokémon 캐릭터, 로고, 포켓볼과 게임 로고를 생성 조건에서 제외했습니다.
@@ -75,10 +80,11 @@
 
 ## 배포 차단 체크리스트
 
-- [ ] `licenses/` 디렉터리에 각 정확한 바이너리 버전의 라이선스 원문을 포함합니다.
-- [ ] ADB/Platform-Tools NOTICE와 배포 조건을 확인합니다.
-- [ ] FFmpeg 실제 빌드 옵션과 대응 소스 제공 의무를 확인합니다.
-- [ ] `aapt` 파일의 출처와 필요성을 확인합니다.
+- [x] `licenses/` 디렉터리에 확인된 바이너리 버전의 라이선스 원문을 포함합니다.
+- [x] ADB/Platform-Tools 37.0.0의 공식 NOTICE 원문과 바이너리 해시를 확인합니다.
+- [x] FFmpeg 실제 빌드 옵션과 적용 라이선스를 확인합니다.
+- [ ] FFmpeg 8.1.1 대응 소스와 scrcpy 4.0 빌드 스크립트를 Release 다운로드 위치에서 제공합니다.
+- [x] 사용되지 않는 `aapt` 파일 두 개를 확인하고 제거합니다.
 - [x] APK 추출 아이콘을 제거하고 독자적인 생성 이미지와 원본 PNG로 교체합니다.
 - [ ] 원본 코드 저작자의 재배포 허가와 파생 프로젝트의 LICENSE 조건을 확인합니다.
 

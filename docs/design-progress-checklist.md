@@ -2,9 +2,8 @@
 
 ## 현재 단계.
 
-- 단계: 구현 및 문서 완료, 전체 검증 진행.
-- 기준 브랜치·커밋: `main` / `d6ad645`.
-- 작업 브랜치·워크트리: `feature/multigame-launcher` / `.worktrees/multigame-launcher`.
+- 단계: 0.1 구현과 Windows 검증 완료, 실제 Android 기기·공개 Release 게이트 대기.
+- 기준 브랜치: `main`.
 
 ## 요구사항 추적.
 
@@ -16,7 +15,7 @@
 | R-004 | Virtual Display 안정화와 미러링 모드 | 구현 완료 | `launcher_core.py`, `pokemon_launcher.py` | 인자·display 파서 테스트 통과 | 자동 display 0 fallback을 금지한다. |
 | R-005 | 해상도·FPS·화면 옵션과 config 호환성 | 구현 완료 | 프로필·core·GUI | 해상도·legacy config 테스트 통과 | 기존 config는 Champions로 이관한다. |
 | R-006 | 로그, timeout, 바이너리 경로와 정상 종료 | 구현 완료 | core·GUI | ADB 소유권·scrcpy·worker 테스트 통과 | 실제 게임 종료 뒤 폴더 rename·삭제 검증은 남았다. |
-| R-007 | README, 보안, 제3자 고지 | 구현 완료 | `README.md`, `THIRD_PARTY_NOTICES.md` | 공식 ZIP과 11개 바이너리 해시 일치 | 배포 전 NOTICE 체크리스트를 완료해야 한다. |
+| R-007 | README, 보안, 제3자 고지 | 일부 완료 | `README.md`, `THIRD_PARTY_NOTICES.md`, `licenses/` | 공식 ZIP·Platform-Tools 해시와 정확한 원문 고지 확인 | 원저작자 허가와 FFmpeg 대응 소스 Release 제공이 남았다. |
 | R-008 | 단위 테스트와 0.1 실행 파일 | 구현 완료 | `tests/`, 루트 exe | 68개 unittest·PyInstaller·GUI smoke 통과 | 1.0 승격 전 실제 Android 안정화 검증이 필요하다. |
 
 ## 단계별 게이트.

@@ -114,7 +114,7 @@ Android 기기가 필요 없는 테스트는 프로필, ADB 출력 파싱, Activ
 
 ## 제3자 구성요소와 라이선스
 
-저장소의 바이너리 구성과 확인 상태는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참조하세요. 새 배포본을 만들기 전에 해당 버전의 원문 라이선스와 NOTICE 파일을 배포물에 함께 넣어야 합니다.
+저장소의 바이너리 구성과 확인 상태는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참조하세요. 확인된 원문 라이선스와 NOTICE는 [licenses](licenses/)에 포함되어 있습니다. 공개 바이너리 Release는 원본 코드 재배포 조건과 FFmpeg 대응 소스 제공 절차가 확정된 뒤에만 만듭니다.
 
 ## 비공식 프로젝트 고지
 
